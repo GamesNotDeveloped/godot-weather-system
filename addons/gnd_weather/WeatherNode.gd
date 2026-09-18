@@ -14,6 +14,8 @@ const RAIN_FIELD_RUNTIME_REFRESH_INTERVAL_MSEC := 250
 const RAIN_FIELD_COUNT_REDUCTION_SPACING_SCALE := 2.0
 const RAIN_FIELD_WIDTH_SCALE := 1.5
 const LIGHTNING_ROLL_INTERVAL_SEC := 0.1
+# Must match MAX_EXCLUSIONS in rain_streak.gdshader.
+const MAX_RAIN_EXCLUSION_VOLUMES := 4
 
 @export_group("Nodes")
 @export_node_path("Node") var skydome_path: NodePath
@@ -249,6 +251,7 @@ var _mid_rain_field: MultiMeshInstance3D
 var _near_rain_debug_material: StandardMaterial3D
 var _mid_rain_debug_material: StandardMaterial3D
 var _rain_mesh_debug_preview_enabled: bool = false
+var _pushed_rain_exclusion_count: int = 0
 var _environment: Environment
 var _current_global_precipitation: float = 0.0
 var _current_cloud_density: float = 0.0
@@ -749,6 +752,32 @@ func _set_rain_field_tint(rain_field: MultiMeshInstance3D, tint: Color) -> void:
     material.set_shader_parameter("tint", tint)
 
 
+# Cached rain fields are refreshed at most every RAIN_FIELD_RUNTIME_REFRESH_INTERVAL_MSEC, so fast
+# moving shelters (e.g. vehicles) are also culled exactly in the shader every frame.
+func _push_rain_exclusion_volumes() -> void:
+    var volumes: Array = WeatherServer.get_rain_exclusion_volumes(get_world_3d(), MAX_RAIN_EXCLUSION_VOLUMES)
+    if volumes.is_empty() and _pushed_rain_exclusion_count == 0:
+        return
+
+    var inverse_transforms: Array[Projection] = []
+    var half_sizes := PackedVector3Array()
+    for volume in volumes:
+        var rain_volume := volume as RainVolume
+        inverse_transforms.append(Projection(rain_volume.global_transform.affine_inverse()))
+        half_sizes.append(rain_volume.get_half_size())
+    while inverse_transforms.size() < MAX_RAIN_EXCLUSION_VOLUMES:
+        inverse_transforms.append(Projection.IDENTITY)
+        half_sizes.append(Vector3.ZERO)
+
+    for material in [_get_rain_field_material(_near_rain_field), _get_rain_field_material(_mid_rain_field)]:
+        if material == null:
+            continue
+        material.set_shader_parameter("exclusion_count", volumes.size())
+        material.set_shader_parameter("exclusion_inverse_transforms", inverse_transforms)
+        material.set_shader_parameter("exclusion_half_sizes", half_sizes)
+    _pushed_rain_exclusion_count = volumes.size()
+
+
 func _get_rain_field_material(rain_field: MultiMeshInstance3D) -> ShaderMaterial:
     if rain_field == null or rain_field.multimesh == null:
         return null
@@ -796,6 +825,7 @@ func _update_rain_rendering() -> void:
         _clear_rain_field_layer(_mid_rain_field)
         return
 
+    _push_rain_exclusion_volumes()
     var view_transform := camera.global_transform
     var rain_basis: Basis = _get_rain_field_basis(rain_direction, view_transform.basis)
     var near_card_height: float = _get_rain_field_card_height(near_emission_extents, near_layer_intensity, false)

@@ -98,6 +98,10 @@ func get_lightning_multiplier() -> float:
     return maxf(lightning_multiplier, 0.0)
 
 
+func get_half_size() -> Vector3:
+    return _cached_half_size
+
+
 ## Distance from world_position to the volume's outer (feathered) box; 0 inside it.
 func get_distance_to(world_position: Vector3) -> float:
     var local_position := global_transform.affine_inverse() * world_position

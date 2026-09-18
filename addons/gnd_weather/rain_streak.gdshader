@@ -18,8 +18,15 @@ uniform float roughness : hint_range(0.0, 1.0) = 0.1;
 uniform float specular_fade_start : hint_range(0.0, 50.0) = 2.0;
 uniform float specular_fade_end : hint_range(0.1, 100.0) = 8.0;
 
+// Boxes (world-to-box transforms and half sizes) where rain is discarded; set by WeatherNode.
+const int MAX_EXCLUSIONS = 4;
+uniform int exclusion_count = 0;
+uniform mat4 exclusion_inverse_transforms[MAX_EXCLUSIONS];
+uniform vec3 exclusion_half_sizes[MAX_EXCLUSIONS];
+
 varying vec4 instance_custom_data;
 varying float streak_flow;
+varying vec3 world_position;
 
 float hash11(float p) {
 	return fract(sin(p) * 43758.5453123);
@@ -37,9 +44,20 @@ void vertex() {
 	VERTEX.y += (streak_flow - 0.5) * travel_distance;
 	VERTEX.x += offset_x + sin((streak_flow + detail) * 6.28318) * mix(0.0, 0.012, detail);
 	VERTEX.z += offset_z;
+	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 void fragment() {
+	for (int i = 0; i < MAX_EXCLUSIONS; i++) {
+		if (i >= exclusion_count) {
+			break;
+		}
+		vec3 local_position = (exclusion_inverse_transforms[i] * vec4(world_position, 1.0)).xyz;
+		if (all(lessThanEqual(abs(local_position), exclusion_half_sizes[i]))) {
+			discard;
+		}
+	}
+
 	float instance_alpha = clamp(instance_custom_data.g, 0.0, 1.0);
 	float variation = instance_custom_data.b;
 	float detail = instance_custom_data.a;

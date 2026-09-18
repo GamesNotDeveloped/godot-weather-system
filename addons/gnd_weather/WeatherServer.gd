@@ -35,6 +35,7 @@ static var _visible_rain_probe_fields_by_world: Dictionary = {}
 static var _visible_rain_probe_configs_by_world: Dictionary = {}
 static var _weather_state_by_world: Dictionary = {}
 static var _rain_render_fields_by_world: Dictionary = {}
+static var _active_rain_volumes_by_world: Dictionary = {}
 static var _global_wind_direction: Vector2 = Vector2(0.8, 0.3)
 static var _global_wind_speed: float = 1.0
 static var _global_wind_strength: float = 4.0
@@ -155,7 +156,20 @@ static func set_rain_volume_active_distance(world_3d: World3D, distance: float) 
     if state.is_empty():
         return
     state["rain_volume_active_distance"] = maxf(distance, 0.0)
+    _active_rain_volumes_by_world.erase(world_3d.get_instance_id())
     _store_weather_state(world_3d, state)
+
+
+## Nearest active volumes that remove rain completely (precipitation delta -1), for exact
+## per-frame culling in the rain shader.
+static func get_rain_exclusion_volumes(world_3d: World3D, max_count: int) -> Array:
+    var exclusion_volumes: Array = []
+    for volume in _get_active_rain_volumes(world_3d):
+        if exclusion_volumes.size() >= max_count:
+            break
+        if (volume as RainVolume).get_precipitation_delta() <= -1.0:
+            exclusion_volumes.append(volume)
+    return exclusion_volumes
 
 
 static func mark_rain_volumes_changed(world_3d: World3D) -> void:
@@ -256,6 +270,7 @@ static func set_weather_observer_sample(world_3d: World3D, world_position: Vecto
         return
     state["observer_position"] = world_position
     state["has_observer_sample"] = true
+    _active_rain_volumes_by_world.erase(world_3d.get_instance_id())
     _refresh_weather_state(world_3d, state)
     _store_weather_state(world_3d, state)
 
@@ -266,6 +281,7 @@ static func clear_weather_observer_sample(world_3d: World3D) -> void:
         return
     state["observer_position"] = Vector3.ZERO
     state["has_observer_sample"] = false
+    _active_rain_volumes_by_world.erase(world_3d.get_instance_id())
     _refresh_weather_state(world_3d, state)
     _store_weather_state(world_3d, state)
 
@@ -1034,6 +1050,12 @@ static func _get_active_rain_volumes(world_3d: World3D) -> Array:
     if world_bucket.is_empty():
         return []
 
+    # Resolved once per frame; every rain query in the same frame reuses the list.
+    var frame: int = Engine.get_process_frames()
+    var cached: Dictionary = _active_rain_volumes_by_world.get(world_id, {})
+    if int(cached.get("frame", -1)) == frame:
+        return cached["volumes"]
+
     var state: Dictionary = _weather_state_by_world.get(world_id, {})
     var has_observer: bool = bool(state.get("has_observer_sample", false))
     var observer_position: Vector3 = state.get("observer_position", Vector3.ZERO)
@@ -1062,7 +1084,9 @@ static func _get_active_rain_volumes(world_3d: World3D) -> Array:
         else:
             _rain_volumes_by_world[world_id] = world_bucket
 
-    return _sort_rain_volumes(volumes)
+    var sorted_volumes: Array = _sort_rain_volumes(volumes)
+    _active_rain_volumes_by_world[world_id] = {"frame": frame, "volumes": sorted_volumes}
+    return sorted_volumes
 
 
 static func _notify_rain_volumes_changed(world_3d: World3D) -> void:
@@ -1071,6 +1095,7 @@ static func _notify_rain_volumes_changed(world_3d: World3D) -> void:
 
     var world_id := world_3d.get_instance_id()
     _rain_volume_revision_by_world[world_id] = int(_rain_volume_revision_by_world.get(world_id, 0)) + 1
+    _active_rain_volumes_by_world.erase(world_id)
     _visible_rain_probe_fields_by_world.erase(world_id)
     _rain_render_fields_by_world.erase(world_id)
 
