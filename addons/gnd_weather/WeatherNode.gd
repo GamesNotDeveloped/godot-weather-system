@@ -436,6 +436,10 @@ func _push_rain_probe_config() -> void:
         rain_probe_max_count,
         rain_probe_distance
     )
+    WeatherServer.set_rain_volume_active_distance(
+        get_world_3d(),
+        maxf(rain_probe_distance, maxf(near_emission_extents.length(), mid_emission_extents.length()))
+    )
     _invalidate_rain_field_state_cache()
 
 

@@ -62,6 +62,7 @@ static func _make_default_weather_state() -> Dictionary:
         "shelter_factor": 0.0,
         "local_emission_scale": 1.0,
         "wind_time": 0.0,
+        "rain_volume_active_distance": INF,
     }
 
 
@@ -146,6 +147,15 @@ static func remove_rain_volume(world_3d: World3D, volume_rid: RID) -> void:
     else:
         _rain_volumes_by_world[world_id] = world_bucket
     _notify_rain_volumes_changed(world_3d)
+
+
+## Rain volumes farther than this from the weather observer are ignored by all rain queries.
+static func set_rain_volume_active_distance(world_3d: World3D, distance: float) -> void:
+    var state := _ensure_weather_state(world_3d)
+    if state.is_empty():
+        return
+    state["rain_volume_active_distance"] = maxf(distance, 0.0)
+    _store_weather_state(world_3d, state)
 
 
 static func mark_rain_volumes_changed(world_3d: World3D) -> void:
@@ -1024,6 +1034,10 @@ static func _get_active_rain_volumes(world_3d: World3D) -> Array:
     if world_bucket.is_empty():
         return []
 
+    var state: Dictionary = _weather_state_by_world.get(world_id, {})
+    var has_observer: bool = bool(state.get("has_observer_sample", false))
+    var observer_position: Vector3 = state.get("observer_position", Vector3.ZERO)
+    var active_distance: float = float(state.get("rain_volume_active_distance", INF))
     var stale_ids: Array[int] = []
     var volumes: Array = []
     for volume_id in world_bucket.keys():
@@ -1035,6 +1049,8 @@ static func _get_active_rain_volumes(world_3d: World3D) -> Array:
             stale_ids.append(volume_id)
             continue
         if not volume.is_rain_volume_enabled():
+            continue
+        if has_observer and volume.get_distance_to(observer_position) > active_distance:
             continue
         volumes.append(volume)
 

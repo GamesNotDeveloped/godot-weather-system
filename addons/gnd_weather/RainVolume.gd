@@ -74,15 +74,12 @@ var _cached_edge_feather: float = 0.6
 
 func _notification(what: int) -> void:
     if what == NOTIFICATION_READY:
-        set_notify_transform(true)
         _refresh_cached_volume_shape()
 
     if what == NOTIFICATION_ENTER_WORLD:
         _register_in_weather_server()
     elif what == NOTIFICATION_EXIT_WORLD:
         _unregister_from_weather_server()
-    elif what == NOTIFICATION_TRANSFORM_CHANGED:
-        _notify_weather_server_changed()
 
 
 func is_rain_volume_enabled() -> bool:
@@ -99,6 +96,12 @@ func get_precipitation_multiplier() -> float:
 
 func get_lightning_multiplier() -> float:
     return maxf(lightning_multiplier, 0.0)
+
+
+## Distance from world_position to the volume's outer (feathered) box; 0 inside it.
+func get_distance_to(world_position: Vector3) -> float:
+    var local_position := global_transform.affine_inverse() * world_position
+    return (local_position - local_position.clamp(-_cached_outer_half_size, _cached_outer_half_size)).length()
 
 
 func contains_world_position(world_position: Vector3) -> bool:
