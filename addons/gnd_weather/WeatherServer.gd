@@ -10,12 +10,8 @@ const WIND_STRENGTH_SETTING := &"shader_globals/gnd_wind_strength"
 const WIND_TIME_SETTING := &"shader_globals/gnd_wind_time"
 const WIND_TURBULENCE_SETTING := &"shader_globals/gnd_wind_turbulence"
 const WIND_PATTERN_SETTING := &"shader_globals/gnd_wind_pattern"
-const WIND_DIRECTION_VALUE_SETTING := &"shader_globals/gnd_wind_direction/value"
-const WIND_SPEED_VALUE_SETTING := &"shader_globals/gnd_wind_speed/value"
-const WIND_STRENGTH_VALUE_SETTING := &"shader_globals/gnd_wind_strength/value"
-const WIND_TIME_VALUE_SETTING := &"shader_globals/gnd_wind_time/value"
-const WIND_TURBULENCE_VALUE_SETTING := &"shader_globals/gnd_wind_turbulence/value"
-const WIND_PATTERN_VALUE_SETTING := &"shader_globals/gnd_wind_pattern/value"
+const WIND_STRENGTH_GLOBAL := &"gnd_wind_strength"
+const WIND_TURBULENCE_GLOBAL := &"gnd_wind_turbulence"
 const VISIBLE_RAIN_PROBE_REFERENCE_DISTANCE := 8.0
 const RAIN_FIELD_FEATHER_RENDER_CUTOFF := 0.24
 const RAIN_PROBE_SUPPRESSIVE_FEATHER_BLEND_START := 0.28
@@ -39,6 +35,10 @@ static var _visible_rain_probe_fields_by_world: Dictionary = {}
 static var _visible_rain_probe_configs_by_world: Dictionary = {}
 static var _weather_state_by_world: Dictionary = {}
 static var _rain_render_fields_by_world: Dictionary = {}
+static var _global_wind_direction: Vector2 = Vector2(0.8, 0.3)
+static var _global_wind_speed: float = 1.0
+static var _global_wind_strength: float = 4.0
+static var _global_wind_turbulence: float = 1.0
 
 
 static func _make_default_weather_state() -> Dictionary:
@@ -342,35 +342,29 @@ static func ensure_wind_project_settings() -> void:
         ProjectSettings.save()
 
 
-static func get_global_wind_direction(fallback: Vector2 = Vector2(0.8, 0.3)) -> Vector2:
-    ensure_wind_project_settings()
-    var direction := fallback
-    if ProjectSettings.has_setting(String(WIND_DIRECTION_VALUE_SETTING)):
-        direction = ProjectSettings.get_setting(String(WIND_DIRECTION_VALUE_SETTING), direction)
-    if direction.length_squared() <= 0.0001:
-        return Vector2(0.8, 0.3)
-    return direction.normalized()
+static func configure_global_wind(direction: Vector2, speed: float, strength: float, turbulence: float) -> void:
+    _global_wind_direction = direction.normalized() if direction.length_squared() > 0.0001 else Vector2(0.8, 0.3)
+    _global_wind_speed = maxf(speed, 0.0)
+    _global_wind_strength = maxf(strength, 0.0)
+    _global_wind_turbulence = maxf(turbulence, 0.0)
+    RenderingServer.global_shader_parameter_set(StringName(WIND_STRENGTH_GLOBAL), _global_wind_strength)
+    RenderingServer.global_shader_parameter_set(StringName(WIND_TURBULENCE_GLOBAL), _global_wind_turbulence)
 
 
-static func get_global_wind_speed(fallback: float = 1.0) -> float:
-    ensure_wind_project_settings()
-    if ProjectSettings.has_setting(String(WIND_SPEED_VALUE_SETTING)):
-        return maxf(float(ProjectSettings.get_setting(String(WIND_SPEED_VALUE_SETTING), fallback)), 0.0)
-    return maxf(fallback, 0.0)
+static func get_global_wind_direction(_fallback: Vector2 = Vector2(0.8, 0.3)) -> Vector2:
+    return _global_wind_direction
 
 
-static func get_precipitation_wind_strength(fallback: float = 4.0) -> float:
-    ensure_wind_project_settings()
-    if ProjectSettings.has_setting(String(WIND_STRENGTH_VALUE_SETTING)):
-        return maxf(float(ProjectSettings.get_setting(String(WIND_STRENGTH_VALUE_SETTING), fallback)), 0.0)
-    return maxf(fallback, 0.0)
+static func get_global_wind_speed(_fallback: float = 1.0) -> float:
+    return _global_wind_speed
 
 
-static func get_global_wind_turbulence(fallback: float = 1.0) -> float:
-    ensure_wind_project_settings()
-    if ProjectSettings.has_setting(String(WIND_TURBULENCE_VALUE_SETTING)):
-        return maxf(float(ProjectSettings.get_setting(String(WIND_TURBULENCE_VALUE_SETTING), fallback)), 0.0)
-    return maxf(fallback, 0.0)
+static func get_precipitation_wind_strength(_fallback: float = 4.0) -> float:
+    return _global_wind_strength
+
+
+static func get_global_wind_turbulence(_fallback: float = 1.0) -> float:
+    return _global_wind_turbulence
 
 
 static func get_weather_controlled_wind_speed(world_3d: World3D, fallback: float = 1.0) -> float:
@@ -1108,7 +1102,6 @@ static func _ensure_visible_rain_probe_field_cache(world_3d: World3D, cache_key:
 
 
 static func _apply_weather_controlled_wind(world_3d: World3D) -> void:
-    ensure_wind_project_settings()
     RenderingServer.global_shader_parameter_set(StringName(WIND_DIRECTION_GLOBAL), get_final_wind_direction(world_3d))
     RenderingServer.global_shader_parameter_set(
         StringName(WIND_SPEED_GLOBAL),

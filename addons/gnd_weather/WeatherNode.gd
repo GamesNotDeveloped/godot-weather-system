@@ -14,9 +14,6 @@ const RAIN_FIELD_RUNTIME_REFRESH_INTERVAL_MSEC := 250
 const RAIN_FIELD_COUNT_REDUCTION_SPACING_SCALE := 2.0
 const RAIN_FIELD_WIDTH_SCALE := 1.5
 const LIGHTNING_ROLL_INTERVAL_SEC := 0.1
-const GND_WIND_DIRECTION_SETTING := "shader_globals/gnd_wind_direction/value"
-const GND_WIND_SPEED_SETTING := "shader_globals/gnd_wind_speed/value"
-const GND_WIND_STRENGTH_SETTING := "shader_globals/gnd_wind_strength/value"
 
 @export_group("Nodes")
 @export_node_path("Node") var skydome_path: NodePath
@@ -219,6 +216,34 @@ const GND_WIND_STRENGTH_SETTING := "shader_globals/gnd_wind_strength/value"
             _apply_weather_state(true)
             _refresh_editor_preview()
 
+@export_group("Advanced")
+@export_subgroup("Global Wind", "global_wind_")
+## Drives WeatherServer's global wind (shared by all weather consumers and wind shader globals).
+@export var global_wind_direction: Vector2 = Vector2(0.8, 0.3):
+    set(value):
+        global_wind_direction = value
+        if is_inside_tree():
+            _push_weather_server_settings()
+            _apply_weather_state(true)
+@export_range(0.0, 10.0, 0.01, "or_greater") var global_wind_speed: float = 1.0:
+    set(value):
+        global_wind_speed = maxf(value, 0.0)
+        if is_inside_tree():
+            _push_weather_server_settings()
+            _apply_weather_state(true)
+@export_range(0.0, 10.0, 0.01, "or_greater") var global_wind_strength: float = 4.0:
+    set(value):
+        global_wind_strength = maxf(value, 0.0)
+        if is_inside_tree():
+            _push_weather_server_settings()
+            _apply_weather_state(true)
+@export_range(0.0, 4.0, 0.01, "or_greater") var global_wind_turbulence: float = 1.0:
+    set(value):
+        global_wind_turbulence = maxf(value, 0.0)
+        if is_inside_tree():
+            _push_weather_server_settings()
+            _apply_weather_state(true)
+
 var _near_rain_field: MultiMeshInstance3D
 var _mid_rain_field: MultiMeshInstance3D
 var _near_rain_debug_material: StandardMaterial3D
@@ -324,23 +349,9 @@ func set_storm_fog_intensity(value: float) -> void:
 
 
 func apply_wind_controls(strength_ratio: float, direction: Vector2) -> void:
-    var normalized_direction := direction.normalized()
-    var gnd_speed := lerpf(0.15, 3.0, strength_ratio)
-    var gnd_strength := lerpf(0.4, 5.0, strength_ratio)
-
-    ProjectSettings.set_setting(GND_WIND_DIRECTION_SETTING, normalized_direction)
-    ProjectSettings.set_setting(GND_WIND_SPEED_SETTING, gnd_speed)
-    ProjectSettings.set_setting(GND_WIND_STRENGTH_SETTING, gnd_strength)
-    RenderingServer.global_shader_parameter_set("gnd_wind_direction", normalized_direction)
-    RenderingServer.global_shader_parameter_set("gnd_wind_speed", gnd_speed)
-    RenderingServer.global_shader_parameter_set("gnd_wind_strength", gnd_strength)
-
-    var skydome := _get_skydome()
-    if skydome:
-        skydome.clouds_wind_direction = normalized_direction
-        skydome.clouds_wind_strength = gnd_speed
-        skydome.apply_wind_now()
-
+    global_wind_direction = direction.normalized()
+    global_wind_speed = lerpf(0.15, 3.0, strength_ratio)
+    global_wind_strength = lerpf(0.4, 5.0, strength_ratio)
     apply_now()
 
 
@@ -429,6 +440,12 @@ func _push_rain_probe_config() -> void:
 
 
 func _push_weather_server_settings() -> void:
+    WeatherServer.configure_global_wind(
+        global_wind_direction,
+        global_wind_speed,
+        global_wind_strength,
+        global_wind_turbulence
+    )
     WeatherServer.configure_weather_state(
         get_world_3d(),
         precipitation_intensity,
