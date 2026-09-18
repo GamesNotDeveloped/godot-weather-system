@@ -27,6 +27,7 @@ var _rain_mesh_sync_accumulator: float = 0.0
 
 func _enter_tree() -> void:
     WeatherServer.ensure_wind_project_settings()
+    WeatherSettings.register()
     _rain_volume_gizmo_plugin = RAIN_VOLUME_GIZMO_PLUGIN_SCRIPT.new()
     _rain_volume_gizmo_plugin.undo_redo = get_undo_redo()
     add_node_3d_gizmo_plugin(_rain_volume_gizmo_plugin)

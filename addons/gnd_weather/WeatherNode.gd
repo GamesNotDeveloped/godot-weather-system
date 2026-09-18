@@ -17,6 +17,9 @@ const LIGHTNING_ROLL_INTERVAL_SEC := 0.1
 # Must match MAX_EXCLUSIONS in rain_streak.gdshader.
 const MAX_RAIN_EXCLUSION_VOLUMES := 4
 
+## Takes the WeatherSettings project settings (gnd_weather/*) over this node's own values on ready.
+@export var apply_project_settings: bool = false
+
 @export_group("Nodes")
 @export_node_path("Node") var skydome_path: NodePath
 @export_node_path("WorldEnvironment") var world_environment_path: NodePath:
@@ -293,6 +296,9 @@ func _notification(what: int) -> void:
 
 
 func _ready() -> void:
+    if apply_project_settings:
+        for property in WeatherSettings.PROPERTIES:
+            set(property, WeatherSettings.get_value(property))
     _refresh_environment_cache()
     _lightning_rng.randomize()
     _push_weather_server_settings()
