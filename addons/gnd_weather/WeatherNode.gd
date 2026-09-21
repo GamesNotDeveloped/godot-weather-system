@@ -298,7 +298,9 @@ func _notification(what: int) -> void:
 func _ready() -> void:
     if apply_project_settings:
         for property in WeatherSettings.PROPERTIES:
-            set(property, WeatherSettings.get_value(property))
+            # keep what the property was initialised with where the setting does not exist,
+            # which is every exported build (see WeatherSettings.get_value())
+            set(property, WeatherSettings.get_value(property, get(property)))
     _refresh_environment_cache()
     _lightning_rng.randomize()
     _push_weather_server_settings()
