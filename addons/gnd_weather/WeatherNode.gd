@@ -51,14 +51,26 @@ const MAX_RAIN_EXCLUSION_VOLUMES := 4
             _apply_weather_state(true)
             _refresh_editor_preview()
 ## Storm clouds in the sky (Skydome's clouds_storminess) - towering cumulonimbus with dark bases -
-## on their own, to build them up ahead of the rain and the storm. The sky takes the larger of this
-## and storm_intensity.
+## on their own, to build them up ahead of the rain and the storm. The storm (storm_intensity)
+## heightens them: see cloud_storminess_storm_boost and cloud_storminess_storm_base.
 @export_range(0.0, 1.0, 0.001) var cloud_storminess: float = 0.0:
     set(value):
         cloud_storminess = clampf(value, 0.0, 1.0)
         if is_inside_tree():
             _apply_weather_state(true)
             _refresh_editor_preview()
+## How much a full storm adds to cloud_storminess, as a share of it: 1 doubles it
+@export_range(0.0, 4.0, 0.01) var cloud_storminess_storm_boost: float = 1.0:
+    set(value):
+        cloud_storminess_storm_boost = maxf(value, 0.0)
+        if is_inside_tree():
+            _apply_weather_state(true)
+## The storm clouds a full storm brings with cloud_storminess at 0
+@export_range(0.0, 1.0, 0.001) var cloud_storminess_storm_base: float = 0.2:
+    set(value):
+        cloud_storminess_storm_base = clampf(value, 0.0, 1.0)
+        if is_inside_tree():
+            _apply_weather_state(true)
 @export_range(0.0, 1.0, 0.001) var storm_intensity: float = 0.0:
     set(value):
         storm_intensity = clampf(value, 0.0, 1.0)
@@ -364,6 +376,14 @@ func set_cloud_overcast_intensity(value: float) -> void:
 
 func set_cloud_storminess(value: float) -> void:
     cloud_storminess = value
+
+
+## The storm clouds in the sky: cloud_storminess heightened by the storm, a little even from none
+func get_sky_storminess(storm_factor: float = -1.0) -> float:
+    var storm := _current_storm_factor if storm_factor < 0.0 else clampf(storm_factor, 0.0, 1.0)
+    return clampf(
+        cloud_storminess * (1.0 + storm * cloud_storminess_storm_boost) + storm * cloud_storminess_storm_base,
+        0.0, 1.0)
 
 
 func set_storm_intensity(value: float) -> void:
@@ -1344,4 +1364,4 @@ func _push_weather_state(force: bool = false) -> void:
     skydome.lightning_flash = _current_lightning_flash
     # storm clouds - only in a Skydome new enough to have them
     if "clouds_storminess" in skydome:
-        skydome.clouds_storminess = maxf(cloud_storminess, current_cloud_shadow_intensity)
+        skydome.clouds_storminess = get_sky_storminess(current_cloud_shadow_intensity)
