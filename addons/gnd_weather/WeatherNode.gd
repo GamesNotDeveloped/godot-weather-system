@@ -50,6 +50,15 @@ const MAX_RAIN_EXCLUSION_VOLUMES := 4
             _push_weather_server_settings()
             _apply_weather_state(true)
             _refresh_editor_preview()
+## Storm clouds in the sky (Skydome's clouds_storminess) - towering cumulonimbus with dark bases -
+## on their own, to build them up ahead of the rain and the storm. The sky takes the larger of this
+## and storm_intensity.
+@export_range(0.0, 1.0, 0.001) var cloud_storminess: float = 0.0:
+    set(value):
+        cloud_storminess = clampf(value, 0.0, 1.0)
+        if is_inside_tree():
+            _apply_weather_state(true)
+            _refresh_editor_preview()
 @export_range(0.0, 1.0, 0.001) var storm_intensity: float = 0.0:
     set(value):
         storm_intensity = clampf(value, 0.0, 1.0)
@@ -351,6 +360,10 @@ func set_cloud_density(value: float) -> void:
 
 func set_cloud_overcast_intensity(value: float) -> void:
     cloud_overcast_intensity = value
+
+
+func set_cloud_storminess(value: float) -> void:
+    cloud_storminess = value
 
 
 func set_storm_intensity(value: float) -> void:
@@ -1331,4 +1344,4 @@ func _push_weather_state(force: bool = false) -> void:
     skydome.lightning_flash = _current_lightning_flash
     # storm clouds - only in a Skydome new enough to have them
     if "clouds_storminess" in skydome:
-        skydome.clouds_storminess = current_cloud_shadow_intensity
+        skydome.clouds_storminess = maxf(cloud_storminess, current_cloud_shadow_intensity)
