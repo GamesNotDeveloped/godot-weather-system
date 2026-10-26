@@ -326,6 +326,8 @@ func _exit_tree() -> void:
         skydome.fog_density = 0.0
         #skydome.local_emission_scale = 1.0
         skydome.lightning_flash = 0.0
+        if "clouds_storminess" in skydome:
+            skydome.clouds_storminess = 0.0
 
 
 func _process(delta: float) -> void:
@@ -1327,3 +1329,6 @@ func _push_weather_state(force: bool = false) -> void:
     skydome.fog_density = current_fog_intensity
     #skydome.local_emission_scale = local_emission_scale
     skydome.lightning_flash = _current_lightning_flash
+    # storm clouds - only in a Skydome new enough to have them
+    if "clouds_storminess" in skydome:
+        skydome.clouds_storminess = current_cloud_shadow_intensity
