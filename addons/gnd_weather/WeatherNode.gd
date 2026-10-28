@@ -1455,6 +1455,23 @@ func set_ground(ground: Dictionary) -> void:
     _apply_weather_state_snapshot(WeatherServer.get_weather_state(get_world_3d()))
 
 
+## The light all round the rain's drops take (their shaders leave the engine's ambient light, worked
+## out for every pixel of every drop, out): the Environment's as it mixes it - its ambient colour into
+## the sky's by ambient_light_sky_contribution, the sky's the fog's light colour (the sky's own as the
+## sky draws it) - times its energy; none without an Environment
+func get_rain_ambient_light() -> Color:
+    var environment := _get_environment()
+    if environment == null:
+        return Color.BLACK
+    var light := environment.ambient_light_color
+    match environment.ambient_light_source:
+        Environment.AMBIENT_SOURCE_DISABLED:
+            return Color.BLACK
+        Environment.AMBIENT_SOURCE_BG, Environment.AMBIENT_SOURCE_SKY:
+            light = light.lerp(environment.fog_light_color, environment.ambient_light_sky_contribution)
+    return light * environment.ambient_light_energy
+
+
 ## The way the rain falls now (world space, any length), the steady wind slanting it as the drawn
 ## rain's (its gusts are the gust field's, place by place)
 func get_rain_fall_direction() -> Vector3:
@@ -1536,6 +1553,7 @@ func _update_rain_layers(camera: Camera3D, render_intensity: float, _global_inte
             mesh.set_shader_parameter(&"fall_direction", fall_direction)
             mesh.set_shader_parameter(&"wind", wind)
             mesh.set_shader_parameter(&"wind_offset", _rain_wind_offset)
+            mesh.set_shader_parameter(&"ambient_light", get_rain_ambient_light())
             mesh.set_shader_parameter(&"gust_strength", get_wind_gust_strength())
             mesh.set_shader_parameter(&"gust_scale", global_wind_gust_size)
             mesh.set_shader_parameter(&"turbulence", get_wind_eddy_strength())

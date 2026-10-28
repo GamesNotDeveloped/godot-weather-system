@@ -45,6 +45,10 @@ uniform float turbulence : hint_range(0.0, 5.0) = 0.0;
 
 // the way the rain falls (WeatherNode), for what a roof shelters
 uniform vec3 fall_direction = vec3(0.0, -1.0, 0.0);
+// The light all round the drops take (WeatherNode.get_rain_ambient_light()): the shaders including
+// this leave the engine's ambient light out (render_mode ambient_light_disabled), worked out for every
+// pixel of every drop - SDFGI's probes included - and take it as one colour for the whole rain
+uniform vec3 ambient_light = vec3(0.0);
 
 varying vec4 instance_custom_data;
 varying float streak_flow;
@@ -193,7 +197,7 @@ void fragment() {
 	float dist = length(VERTEX);
 	float specular_fade = 1.0 - smoothstep(specular_fade_start, specular_fade_end, dist);
 	SPECULAR = specular * specular_fade;
-	EMISSION = vec3(1.0, 1.0, 1.0) * intensity * 0.005 * specular_fade;
+	EMISSION = vec3(1.0, 1.0, 1.0) * intensity * 0.005 * specular_fade + ALBEDO * ambient_light;
 
 	// Curve the normal to make the streak act like a cylinder rather than a flat mirror.
 	// Softened the multiplier from 2.5 to 1.8 to prevent side-lights from catching too aggressively.
