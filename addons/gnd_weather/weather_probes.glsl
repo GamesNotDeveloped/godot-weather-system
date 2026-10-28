@@ -202,11 +202,15 @@ void work_ground(ivec3 texel) {
 		state.x = min(state.x + rain_mm * hours / wet_film * reach, open_wet);
 		state.y = min(state.y + snow_fall * hours * reach, open_snow);
 		state.z = min(state.z + rain_mm * hours * reach, open_water);
-		// warmer than the air: the snow melts and the wet dries by as much more
+		// warmer than the air: the snow melts by as much more, and the wet dries as much faster as the
+		// air's vapour pressure falls further short of the saturated there than on the open ground (the
+		// open ground's own drying is the ground model's: its amounts cap these)
 		float warmth = max(t, 0.0) - max(air, 0.0);
 		if (warmth > 0.0) {
 			state.y = max(state.y - hours * melt_per_degree * warmth, 0.0);
-			float drying = hours * drying_mm * warmth / 15.0 * clamp((1.0 - probe.b) / 0.3, 0.0, 3.0);
+			float vapour = clamp(params.p[16], 0.0, 1.0) * saturation(air);
+			float open_deficit = max(saturation(air) - vapour, 0.0001);
+			float drying = hours * drying_mm * max((saturation(t) - vapour) / open_deficit - 1.0, 0.0);
 			state.x = max(state.x - drying / wet_film, 0.0);
 			state.z = max(state.z - drying, 0.0);
 		}

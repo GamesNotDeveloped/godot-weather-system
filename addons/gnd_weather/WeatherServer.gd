@@ -88,10 +88,11 @@ const SNOW_COVER_DEPTH := 0.03
 ## The water the surfaces hold before it runs off into the hollows, in millimetres: wet through
 ## (wetness 1) once it is there
 const WET_FILM_MM := 1.0
-## The air's humidity drying_mm_per_hour is at (a mild day's), and how many times faster the driest
-## air dries the ground
+## The air drying_mm_per_hour is at (a mild day's): its humidity and temperature (°C). The water
+## dries off as fast as the air's vapour pressure falls short of the saturated (get_vapour_deficit()):
+## some 6 times faster at 40 °C, 14 in a dry heat, none in a saturated air
 const DRYING_HUMIDITY := 0.7
-const DRYING_HUMIDITY_MAX_SPEEDUP := 3.0
+const DRYING_TEMPERATURE := 10.0
 ## The density, of the water's, a snowfall's depth is reckoned at (snowfall_depth_per_hour); a
 ## scenario's snow lies at SETTLED_SNOW_DENSITY, a soaked one sinks to WET_SNOW_DENSITY
 const REFERENCE_SNOW_DENSITY := 0.1
@@ -193,6 +194,16 @@ func get_ground_model(world_3d: World3D) -> WeatherGroundModel:
 
 
 ## The wind's speed the weather's state has, a downpour's own in it (a ground model's)
+## The vapour pressure of a saturated air at temperature (°C), in hPa (Magnus)
+func get_saturation_vapour_pressure(temperature: float) -> float:
+    return 6.112 * exp(17.62 * temperature / (243.12 + temperature))
+
+
+## How far the air's vapour pressure falls short of the saturated (hPa): what water evaporates by
+func get_vapour_deficit(temperature: float, humidity: float) -> float:
+    return get_saturation_vapour_pressure(temperature) * (1.0 - clampf(humidity, 0.0, 1.0))
+
+
 func get_state_wind_speed(state: Dictionary) -> float:
     return _get_weather_controlled_wind_speed_for_state(state, 1.0)
 

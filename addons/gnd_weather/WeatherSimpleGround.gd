@@ -123,13 +123,15 @@ func get_rain_mm(state: Dictionary, rainfall: float) -> float:
     return rainfall * rainfall * float(state.get("rain_mm_per_hour", 50.0))
 
 
-## The water that dries off over hours at a temperature: the drier the air the faster, none in a
-## saturated one
+## The water that dries off over hours at a temperature: drying_mm_per_hour as far as the air's
+## vapour pressure falls short of the saturated, against a mild day's (WeatherServer.DRYING_*) - the
+## warmer and the drier the air the faster, none in a saturated one - and the faster in a wind
 func get_drying(state: Dictionary, hours: float, temperature: float) -> float:
     var humidity := float(state.get("air_humidity", WeatherServer.DRYING_HUMIDITY))
-    return (float(state.get("drying_mm_per_hour", 0.3)) * clampf((temperature + 5.0) / 15.0, 0.2, 2.0)
-        * clampf((1.0 - humidity) / (1.0 - WeatherServer.DRYING_HUMIDITY), 0.0, WeatherServer.DRYING_HUMIDITY_MAX_SPEEDUP)
-        * hours)
+    var deficit := WeatherServer.get_vapour_deficit(temperature, humidity) \
+            / WeatherServer.get_vapour_deficit(WeatherServer.DRYING_TEMPERATURE, WeatherServer.DRYING_HUMIDITY)
+    var wind := 1.0 + WeatherServer.get_state_wind_speed(state) / 4.0
+    return float(state.get("drying_mm_per_hour", 0.3)) * deficit * wind * hours
 
 
 ## The snowfall's water settling on the ground in an hour (mm): a sleet's melts as it lands above

@@ -117,9 +117,11 @@ The rain is water in millimetres: `rain_mm_per_hour` (50) at the full intensity,
 heavy 0.5 is some 12, a light 0.2 is 2). The first millimetre, and the melt's water, wet the
 surfaces through (`wetness` 1) - a downpour in a minute; the rest runs off into the hollows, the
 puddles: 5 mm fills them to the brim (`puddles` 1), up to 15 mm floods over them. The ground soaks
-them up, `drainage_mm_per_hour` (2, hardly at all frozen). The water dries off `drying_mm_per_hour`
-(0.3, faster the warmer, and the drier the air: `air_humidity` 0.7 is that rate, a saturated air
-dries nothing).
+them up, `drainage_mm_per_hour` (2, hardly at all frozen). The water dries off as fast as the air's
+vapour pressure falls short of the saturated (Magnus): `drying_mm_per_hour` (0.3) at 10 °C in still
+air of an `air_humidity` of 0.7, some 6 times that at 40 °C and 14 in a dry heat, none in a
+saturated air, and faster in a wind (twice in 4 m/s): the wet of a downpour goes in half an hour
+of a hot day, ten minutes of a dry heat, three hours of a mild one. A heat source dries the ground about it as much faster as it is warmer.
 
 That is `WeatherSimpleGround`, a world's ground model unless another is set:
 `WeatherServer.set_ground_model(world, model)` with a `WeatherGroundModel` of your own - its keys of

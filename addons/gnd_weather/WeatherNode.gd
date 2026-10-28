@@ -447,8 +447,9 @@ enum TemperatureUnit { CELSIUS, FAHRENHEIT }
     set(value):
         rain_mm_per_hour = maxf(value, 0.0)
         _weather_input_changed()
-## The water that dries off the surfaces and the puddles in a world hour at some 10 degrees,
-## faster the warmer
+## The water that dries off the surfaces and the puddles in a world hour at 10 degrees in still air of
+## air_humidity 0.7: as fast as the air's vapour pressure falls short of the saturated - some 6 times
+## faster at 40 degrees - and faster in a wind
 @export_range(0.0, 5.0, 0.01, "suffix:mm/h") var drying_mm_per_hour: float = 0.3:
     set(value):
         drying_mm_per_hour = maxf(value, 0.0)
