@@ -88,6 +88,26 @@ gnd_weather_probes_enabled={
 "type": "float",
 "value": 0.0
 }
+gnd_weather_wet_exists={
+"type": "bool",
+"value": false
+}
+gnd_weather_snow_exists={
+"type": "bool",
+"value": false
+}
+gnd_weather_puddles_exist={
+"type": "bool",
+"value": false
+}
+gnd_weather_rain_exists={
+"type": "bool",
+"value": false
+}
+gnd_weather_surfaces_active={
+"type": "bool",
+"value": false
+}
 gnd_air_temperature={
 "type": "float",
 "value": 10.0

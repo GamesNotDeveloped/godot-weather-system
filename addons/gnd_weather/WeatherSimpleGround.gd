@@ -11,6 +11,14 @@ extends WeatherGroundModel
 const PUDDLES_FULL_MM := 5.0
 const STANDING_WATER_MAX_MM := 15.0
 
+## The least of the wet (0 - 1), the snow lying (m), the water standing (puddles) and the rain
+## falling (0 - 1) the surfaces' shaders draw: below them there is none of it for them
+## (WeatherServer.WET_EXISTS_GLOBAL and the rest)
+const WETNESS_DRAWN := 0.001
+const SNOW_DEPTH_DRAWN := 0.0001
+const PUDDLES_DRAWN := 0.001
+const RAIN_DRAWN := 0.01
+
 
 func get_state_defaults() -> Dictionary:
     return {
@@ -94,6 +102,9 @@ func set_ground(state: Dictionary, ground: Dictionary) -> void:
 func get_globals(state: Dictionary) -> Dictionary:
     var rain := clampf(float(state.get("global_precipitation", 0.0)), 0.0, 1.0) \
             * (1.0 - clampf(float(state.get("snow_fraction", 0.0)), 0.0, 1.0))
+    var wet := float(state.get("wetness", 0.0)) > WETNESS_DRAWN
+    var snow := float(state.get("snow_depth", 0.0)) > SNOW_DEPTH_DRAWN
+    var puddles := float(state.get("puddles", 0.0)) > PUDDLES_DRAWN
     return {
         WeatherServer.SNOW_COVER_GLOBAL: float(state.get("snow_cover", 0.0)),
         WeatherServer.SNOW_DEPTH_GLOBAL: float(state.get("snow_depth", 0.0)),
@@ -102,6 +113,11 @@ func get_globals(state: Dictionary) -> Dictionary:
         WeatherServer.AIR_TEMPERATURE_GLOBAL: float(state.get("air_temperature", 10.0)),
         WeatherServer.RAIN_GLOBAL: rain,
         WeatherServer.PUDDLES_GLOBAL: float(state.get("puddles", 0.0)),
+        WeatherServer.WET_EXISTS_GLOBAL: wet,
+        WeatherServer.SNOW_EXISTS_GLOBAL: snow,
+        WeatherServer.PUDDLES_EXIST_GLOBAL: puddles,
+        WeatherServer.RAIN_EXISTS_GLOBAL: rain > RAIN_DRAWN,
+        WeatherServer.SURFACES_ACTIVE_GLOBAL: wet or snow or puddles,
     }
 
 

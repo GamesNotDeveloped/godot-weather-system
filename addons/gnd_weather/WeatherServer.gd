@@ -51,6 +51,15 @@ const WEATHER_PROBES_GLOBAL := &"gnd_weather_probes"
 const WEATHER_PROBE_ORIGIN_GLOBAL := &"gnd_weather_probe_origin"
 const WEATHER_PROBE_SIZE_GLOBAL := &"gnd_weather_probe_size"
 const WEATHER_PROBES_ENABLED_GLOBAL := &"gnd_weather_probes_enabled"
+## Which of the weather there is on the surfaces, as much as their shaders draw - the wet, the snow
+## lying, the water standing in the hollows, the rain falling - and whether any of it lies there:
+## the ground model's (WeatherSimpleGround.get_globals()), told once here, so the materials branch on
+## them instead of comparing the amounts in every pixel and work nothing out without any
+const WET_EXISTS_GLOBAL := &"gnd_weather_wet_exists"
+const SNOW_EXISTS_GLOBAL := &"gnd_weather_snow_exists"
+const PUDDLES_EXIST_GLOBAL := &"gnd_weather_puddles_exist"
+const RAIN_EXISTS_GLOBAL := &"gnd_weather_rain_exists"
+const SURFACES_ACTIVE_GLOBAL := &"gnd_weather_surfaces_active"
 ## The ground's globals are named with this prefix instead of gnd_, for a project whose materials
 ## read the ground's state under names of its own (e.g. "game_": game_snow_depth, ...); the
 ## wind's keep theirs
@@ -76,6 +85,11 @@ const GROUND_GLOBAL_DEFAULTS := {
     &"gnd_weather_probe_origin": Vector3.ZERO,
     &"gnd_weather_probe_size": Vector3.ONE,
     &"gnd_weather_probes_enabled": 0.0,
+    &"gnd_weather_wet_exists": false,
+    &"gnd_weather_snow_exists": false,
+    &"gnd_weather_puddles_exist": false,
+    &"gnd_weather_rain_exists": false,
+    &"gnd_weather_surfaces_active": false,
 }
 ## The globals whose type their value does not tell (a texture none yet)
 const GROUND_GLOBAL_TYPES := {
@@ -578,6 +592,8 @@ func _get_global_types(value: Variant, global_name: StringName = &"") -> Array:
             return ["mat4", RenderingServer.GLOBAL_VAR_TYPE_MAT4]
         TYPE_NIL, TYPE_OBJECT:
             return ["sampler2D", RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D]
+        TYPE_BOOL:
+            return ["bool", RenderingServer.GLOBAL_VAR_TYPE_BOOL]
     return ["float", RenderingServer.GLOBAL_VAR_TYPE_FLOAT]
 
 
