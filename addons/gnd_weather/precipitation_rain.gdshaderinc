@@ -44,8 +44,12 @@ uniform vec3 fall_direction = vec3(0.0, -1.0, 0.0);
 varying vec4 instance_custom_data;
 varying float streak_flow;
 varying float edge_fade;
-// how much of it a shelter and the probes let through, worked out at the card's corners
+// how much of it the probes let through, worked out at the card's corners
 varying float precipitation_open;
+// where the drop is in the world, and whether the card may reach under a shelter, its pixels
+// tested then (precipitation_near_shelter())
+varying vec3 drop_position;
+varying flat float near_shelter;
 
 float hash11(float p) {
 	return fract(sin(p) * 43758.5453123);
@@ -84,16 +88,23 @@ void vertex() {
 	// the gusts' waves are the world's, so taken where the drop is in it
 	point += precipitation_rain_wind(camera + point, wind, gust_strength, gust_scale, turbulence,
 		instance_custom_data.a + cycle * 0.137, variation, TIME);
-	vec3 world_position = camera + point;
-	// a shelter's and the probes' at the card's corners, not every pixel of it: thinned where the
-	// probes let less of it through (a volume's feathered edge, a partial one), none under a roof
-	precipitation_open = precipitation_sheltered(world_position, fall_direction) ? 0.0 : precipitation_reach(world_position);
+	drop_position = camera + point;
+	// the probes' at the card's corners, not every pixel of it: thinned where they let less of it
+	// through (a volume's feathered edge, a partial one)
+	precipitation_open = precipitation_reach(drop_position);
+	// the whole card from its top to its bottom, as wide as it is and as far as the wind shoves it:
+	// the same at its four corners
+	float half_height = abs(VERTEX.y) * card_scale;
+	vec3 card_top = camera + center + down * ((streak_flow - 0.5) * travel_distance * card_scale - half_height);
+	float margin = abs(VERTEX.x) * card_scale + gust_strength + turbulence * 2.0 + 0.25;
+	near_shelter = precipitation_near_shelter(card_top, down, half_height * 2.0, margin) ? 1.0 : 0.0;
 	VERTEX = mat3(VIEW_MATRIX) * point;
 	NORMAL = normalize(mat3(VIEW_MATRIX) * cross(across, down));
 }
 
 void fragment() {
-	if (precipitation_open <= 0.01) {
+	// under a roof, or in a car: a card's corners above the roof and below the floor let it through
+	if (precipitation_open <= 0.01 || (near_shelter > 0.5 && precipitation_sheltered(drop_position, fall_direction))) {
 		discard;
 	}
 	float instance_alpha = clamp(instance_custom_data.g, 0.0, 1.0) * edge_fade * precipitation_open;

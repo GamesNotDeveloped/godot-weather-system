@@ -32,6 +32,31 @@ float precipitation_reach(vec3 world_position) {
 	return clamp(texture(weather_probes, world_position / weather_probe_size).r, 0.0, 1.0);
 }
 
+// Whether a card standing from start along down for span metres, margin metres about it, may
+// reach under a shelter's roof or into an enclosed one: a rain card is taller than a cab or a roof is
+// deep, its corners above the roof and below the floor at once, so its pixels are tested
+// (precipitation_sheltered()) only where this lets them - once a vertex, the same for the whole card
+bool precipitation_near_shelter(vec3 start, vec3 down, float span, float margin) {
+	for (int i = 0; i < MAX_EXCLUSIONS; i++) {
+		if (i >= exclusion_count) {
+			break;
+		}
+		vec3 half_size = exclusion_half_sizes[i];
+		vec3 a = (exclusion_inverse_transforms[i] * vec4(start, 1.0)).xyz;
+		vec3 b = (exclusion_inverse_transforms[i] * vec4(start + down * span, 1.0)).xyz;
+		vec3 low = min(a, b) - margin;
+		vec3 high = max(a, b) + margin;
+		bool enclosed = (exclusion_enclosed_mask & (1 << i)) != 0;
+		// a roof shelters what is under it however far down, an enclosed box only what is within it
+		if (any(lessThan(high.xz, -half_size.xz)) || any(greaterThan(low.xz, half_size.xz)) || low.y > half_size.y
+				|| (enclosed && high.y < -half_size.y)) {
+			continue;
+		}
+		return true;
+	}
+	return false;
+}
+
 // world_position - the drop's or the flake's; velocity - its flight (world space, any length)
 bool precipitation_sheltered(vec3 world_position, vec3 velocity) {
 	for (int i = 0; i < MAX_EXCLUSIONS; i++) {
