@@ -688,12 +688,12 @@ func _exit_tree() -> void:
     WeatherServer.clear_weather_state(get_world_3d())
     var skydome := _get_skydome()
     if skydome:
-        skydome.clouds_coverage = 0.0
+        skydome.set_sky_param(&"clouds_coverage", 0.0)
         #skydome.cloud_overcast_intensity = -1.0
         #skydome.cloud_shadow_intensity = 0.0
-        skydome.fog_density = 0.0
+        skydome.set_sky_param(&"fog_density", 0.0)
         #skydome.local_emission_scale = 1.0
-        skydome.lightning_flash = 0.0
+        skydome.set_sky_param(&"lightning_flash", 0.0)
 
 
 ## The weather's tick: it goes on by WEATHER_TICK_SECONDS of the game's time, and the precipitation's
@@ -1247,7 +1247,7 @@ func _set_lightning_flash(flash: float) -> void:
     _current_lightning_flash = flash
     var skydome := _get_skydome()
     if skydome != null:
-        skydome.lightning_flash = flash
+        skydome.set_sky_param(&"lightning_flash", flash)
 
 
 ## The thunder on its way heard when its sound arrives
@@ -2003,18 +2003,19 @@ func _push_weather_state(force: bool = false) -> void:
     final_wind_direction = final_wind_direction.normalized()
 
     # only what changed: each of these sets Skydome's sky and light up again
-    if not is_equal_approx(skydome.clouds_coverage, current_cloud_density):
-        skydome.clouds_coverage = current_cloud_density
+    if not is_equal_approx(skydome.get_sky_param(&"clouds_coverage"), current_cloud_density):
+        skydome.set_sky_param(&"clouds_coverage", current_cloud_density)
     var wind := Vector3(final_wind_direction.x, final_wind_direction.y, final_wind_speed)
     if not wind.is_equal_approx(_skydome_wind):
         _skydome_wind = wind
-        skydome.clouds_wind_direction = final_wind_direction
-        skydome.clouds_wind_strength = final_wind_speed
+        skydome.set_sky_param(&"clouds_wind_direction", final_wind_direction)
+        skydome.set_sky_param(&"clouds_wind_strength", final_wind_speed)
         skydome.apply_wind_now()
     #skydome.cloud_overcast_intensity = current_cloud_overcast_intensity
     #skydome.cloud_shadow_intensity = current_cloud_shadow_intensity
     # the storm's fog and the snow's haze together
-    skydome.fog_density = 1.0 - (1.0 - current_fog_intensity) * (1.0 - get_precipitation_haze())
+    skydome.set_sky_param(&"fog_density",
+        1.0 - (1.0 - current_fog_intensity) * (1.0 - get_precipitation_haze()))
     #skydome.local_emission_scale = local_emission_scale
-    if rainbow_intensity >= 0.0 and skydome.rainbow_intensity != rainbow_intensity:
-        skydome.rainbow_intensity = rainbow_intensity
+    if rainbow_intensity >= 0.0 and not skydome.get_sky_param(&"rainbow_intensity") == rainbow_intensity:
+        skydome.set_sky_param(&"rainbow_intensity", rainbow_intensity)

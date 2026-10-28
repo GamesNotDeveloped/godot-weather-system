@@ -42,7 +42,9 @@ there is one, and works without it.
    shaders' parameters change only as the weather does; a shelter (`PrecipitationVolume`) gives the
    shaders its box only as it moves.
 3. Optionally point its `skydome_path` at a Skydome; without one it finds a node named `Skydome`, and
-   with none it fogs the `Environment` itself for a heavy snow.
+   with none it fogs the `Environment` itself for a heavy snow. The weather sets the sky's clouds,
+   wind, fog, lightning and rainbow past the node (`Skydome.set_sky_param()`), so none of it is
+   saved with the scene.
 4. Set the weather: the **Weather** group (`precipitation_intensity`, `precipitation_snow` or
    `snow_from_temperature` with `air_temperature`, clouds, storm), the **Wind** group, the
    **Season** group (`latitude`, `set_date()`) and the **Ground** group (`weather_time_scale` - the
