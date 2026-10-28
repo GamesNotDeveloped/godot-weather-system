@@ -14,6 +14,8 @@ const PROBE_WORLD_SCALE_MIN := 0.03
 const PROBE_WORLD_SCALE_MAX := 0.18
 const PROBE_WORLD_SCALE_FACTOR := 0.015
 const PROBE_COLOR := Color(0.25, 0.78, 1.0, 0.92)
+## Every this many probes of the lattice shown, each way
+const PROBE_PREVIEW_STEP := 4
 const PRECIPITATION_MESH_NEAR_COLOR := Color(0.18, 1.0, 0.72, 0.36)
 const PRECIPITATION_MESH_MID_COLOR := Color(1.0, 0.82, 0.2, 0.3)
 
@@ -24,7 +26,6 @@ var _probe_refresh_timer: Timer
 var _probe_mesh: SphereMesh
 var _probe_material: StandardMaterial3D
 var _probe_instance_rids: Array[RID] = []
-var _preview_weather_node_ids: Array[int] = []
 var _debug_precipitation_mesh_node_ids: Array[int] = []
 var _precipitation_mesh_sync_accumulator: float = 0.0
 
@@ -69,7 +70,6 @@ func _enter_tree() -> void:
 func _exit_tree() -> void:
     _clear_probe_preview()
     _clear_precipitation_mesh_preview()
-    _clear_registered_probe_configs()
     if _probe_refresh_timer != null:
         _probe_refresh_timer.stop()
         _probe_refresh_timer.queue_free()
@@ -101,8 +101,6 @@ func _on_weather_probes_toggled(_enabled: bool) -> void:
     else:
         _clear_probe_preview()
     _update_refresh_timer_state()
-    if not _is_any_debug_preview_enabled():
-        _clear_registered_probe_configs()
 
 
 func _on_precipitation_meshes_toggled(_enabled: bool) -> void:
@@ -112,8 +110,6 @@ func _on_precipitation_meshes_toggled(_enabled: bool) -> void:
     else:
         _clear_precipitation_mesh_preview()
     _update_refresh_timer_state()
-    if not _is_any_debug_preview_enabled():
-        _clear_registered_probe_configs()
 
 
 func _on_probe_refresh_timeout() -> void:
@@ -152,7 +148,6 @@ func _sync_debug_preview(force_precipitation_mesh_sync: bool = false) -> void:
         _clear_probe_preview()
         return
 
-    _sync_registered_probe_configs(world_3d)
     if _weather_probes_button != null and _weather_probes_button.button_pressed:
         _sync_probe_preview(world_3d, camera)
     else:
@@ -160,7 +155,11 @@ func _sync_debug_preview(force_precipitation_mesh_sync: bool = false) -> void:
 
 
 func _sync_probe_preview(world_3d: World3D, camera: Camera3D) -> void:
-    var probe_positions := WeatherServer.get_registered_visible_precipitation_probe_positions(world_3d, camera.global_transform, camera)
+    # the edited weather nodes' probes, a few of them: their lattice and its window
+    var probe_positions := PackedVector3Array()
+    for weather_node in _get_edited_weather_nodes():
+        if weather_node != null:
+            probe_positions.append_array(weather_node.get_weather_probe_positions(PROBE_PREVIEW_STEP))
     _ensure_probe_mesh_resources()
     _ensure_instance_count(_probe_instance_rids, probe_positions.size(), _probe_mesh.get_rid(), RID(), world_3d)
 
@@ -251,43 +250,8 @@ func _clear_precipitation_mesh_preview() -> void:
     _debug_precipitation_mesh_node_ids.clear()
 
 
-func _clear_registered_probe_configs() -> void:
-    var camera := _get_editor_camera()
-    if camera == null:
-        _preview_weather_node_ids.clear()
-        return
-
-    var world_3d := camera.get_world_3d()
-    if world_3d == null:
-        _preview_weather_node_ids.clear()
-        return
-
-    for weather_node_id in _preview_weather_node_ids:
-        WeatherServer.clear_visible_precipitation_probe_field_config(world_3d, weather_node_id)
-    _preview_weather_node_ids.clear()
 
 
-func _sync_registered_probe_configs(world_3d: World3D) -> void:
-    var active_weather_node_ids: Array[int] = []
-    for weather_node in _get_edited_weather_nodes():
-        if weather_node == null:
-            continue
-
-        var weather_node_id: int = weather_node.get_instance_id()
-        active_weather_node_ids.append(weather_node_id)
-        WeatherServer.configure_visible_precipitation_probe_field(
-            world_3d,
-            weather_node_id,
-            weather_node.precipitation_probe_max_count,
-            weather_node.precipitation_probe_distance
-        )
-
-    for weather_node_id in _preview_weather_node_ids:
-        if active_weather_node_ids.has(weather_node_id):
-            continue
-        WeatherServer.clear_visible_precipitation_probe_field_config(world_3d, weather_node_id)
-
-    _preview_weather_node_ids = active_weather_node_ids
 
 
 func _update_refresh_timer_state() -> void:

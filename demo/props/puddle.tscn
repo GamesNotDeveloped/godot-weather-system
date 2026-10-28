@@ -1,0 +1,23 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://addons/gnd_weather/PuddleSurface3D.gd" id="1_6b30a"]
+
+[sub_resource type="Gradient" id="Gradient_wfnq3"]
+colors = PackedColorArray(1, 1, 1, 1, 1, 1, 1, 0)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_s54oc"]
+gradient = SubResource("Gradient_wfnq3")
+fill = 1
+fill_from = Vector2(0.5, 0.5)
+fill_to = Vector2(1, 0.5)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_xur33"]
+size = Vector2(3, 2)
+
+[node name="Puddle" type="Node3D" unique_id=2032105739]
+script = ExtResource("1_6b30a")
+mask_texture = SubResource("GradientTexture2D_s54oc")
+mesh = SubResource("PlaneMesh_xur33")
+surface_height_offset = 0.01
+visibility_range_begin = 30.0
+visibility_range_end = 45.0

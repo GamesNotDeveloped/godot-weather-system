@@ -34,10 +34,19 @@ func configure(_state: Dictionary, _settings: Dictionary) -> void:
 @abstract func get_report(state: Dictionary) -> Dictionary
 
 
-## Each frame of a WeatherNode drawing the weather in the world: what the ground needs of how it
+## On each tick of a WeatherNode drawing the weather in the world: what the ground needs of how it
 ## falls there
 func process(_weather: WeatherNode, _delta: float) -> void:
     pass
+
+
+## What the weather probes need of the ground now (WeatherProbes), by its own reckoning: "rain_mm" -
+## the rain falling (mm an hour), "snow_fall" - the snow settling (m an hour), "melt_per_degree" - how
+## deep a degree of warmth melts its snow (m an hour), "drying_mm" - the water it dries off (mm an
+## hour), and the open ground's "wet" (0 - 1), "snow" (m) and "water" (standing, mm); a model without
+## one leaves it out (none of it then)
+func get_probe_rates(_state: Dictionary) -> Dictionary:
+    return {}
 
 
 ## Let go as the world's weather is cleared

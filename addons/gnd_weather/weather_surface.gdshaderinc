@@ -18,7 +18,9 @@
 //       ROUGHNESS = roughness;
 //   }
 //
-// The globals are WeatherServer's, set by the WeatherNode (the plugin registers them).
+// The globals are WeatherServer's, set by the WeatherNode (the plugin registers them). Where the
+// weather probes reach (WeatherNode's weather_probe_*), the snow, the wet and their warmth are the
+// ground's there: less under a roof, none where a heat source warms it above freezing.
 
 global uniform float gnd_wetness;
 global uniform float gnd_air_temperature;
@@ -26,6 +28,45 @@ global uniform float gnd_air_temperature;
 global uniform float gnd_snow_depth;
 // how wet the lying snow is (0 - 1): soaked by a rain or a thaw, grey slush
 global uniform float gnd_snow_wetness;
+
+// the weather probes' (WeatherProbes): the open ground's share of the snow (r), the wet (g) and the
+// standing water (b) at each, and its temperature (a, °C) - addressed round in the texture - their
+// window's corner and size in the world, and whether there are any
+global uniform sampler3D gnd_weather_ground : filter_linear, repeat_enable;
+global uniform vec3 gnd_weather_probe_origin;
+global uniform vec3 gnd_weather_probe_size;
+global uniform float gnd_weather_probes_enabled;
+
+// How far world_position is in the probes' window: 1 well in, down to 0 towards its sides, 0 out of
+// it or without probes - for blending what the probes tell into the open ground's
+float gnd_weather_probe_blend(vec3 world_position) {
+	vec3 in_window = (world_position - gnd_weather_probe_origin) / max(gnd_weather_probe_size, vec3(0.001));
+	if (gnd_weather_probes_enabled < 0.5 || any(lessThan(in_window, vec3(0.0))) || any(greaterThan(in_window, vec3(1.0)))) {
+		return 0.0;
+	}
+	vec3 from_side = min(in_window, 1.0 - in_window);
+	return smoothstep(0.0, 0.08, min(from_side.x, from_side.z)) * smoothstep(0.0, 0.08, from_side.y);
+}
+
+// The weather at world_position from the probes, blended between them and into the open ground's
+// towards their window's sides: the open ground's share of its snow, its wet and its standing water,
+// and the temperature - 1, 1, 1 and the air's out of them or without them
+vec4 gnd_weather_local(vec3 world_position) {
+	vec4 open_ground = vec4(1.0, 1.0, 1.0, gnd_air_temperature);
+	float inside = gnd_weather_probe_blend(world_position);
+	if (inside <= 0.0) {
+		return open_ground;
+	}
+	return mix(open_ground, texture(gnd_weather_ground, world_position / gnd_weather_probe_size), inside);
+}
+
+// How much of the snow a surface as warm as temperature (°C) - surface_heat warmer than that of its
+// own, a material's warm place - keeps of the open ground's: none where it is above freezing while the
+// air is not, the edge soft over a degree; the open ground's own thaw is its depth's
+float gnd_weather_snow_kept(float temperature, float surface_heat) {
+	float warmth = max(temperature + surface_heat, 0.0) - max(gnd_air_temperature, 0.0);
+	return 1.0 - smoothstep(0.0, 1.0, warmth);
+}
 
 // the depth at which the snow covers the ground (WeatherServer.SNOW_COVER_DEPTH)
 const float GND_SNOW_COVER_DEPTH = 0.03;
@@ -74,7 +115,8 @@ float gnd_weather_snow_patches(vec2 world_xz, float cover) {
 	return max(dusting, lying);
 }
 
-// How much snow lies on a surface (0 - 1): on what faces up, in patches while the cover is thin
+// How much snow lies on a surface (0 - 1): on what faces up, in patches while the cover is thin, as
+// much of it as lies there (gnd_weather_local())
 float gnd_weather_snow(vec3 world_normal, vec3 world_position) {
 	if (gnd_snow_depth <= 0.0001) {
 		return 0.0;
@@ -83,7 +125,9 @@ float gnd_weather_snow(vec3 world_normal, vec3 world_position) {
 	if (facing_up <= 0.0) {
 		return 0.0;
 	}
-	float cover = clamp(gnd_snow_depth * gnd_weather_snow_heaping(world_position.xz) / GND_SNOW_COVER_DEPTH, 0.0, 1.0);
+	vec4 local = gnd_weather_local(world_position);
+	float depth = gnd_snow_depth * local.r * gnd_weather_snow_kept(local.a, 0.0);
+	float cover = clamp(depth * gnd_weather_snow_heaping(world_position.xz) / GND_SNOW_COVER_DEPTH, 0.0, 1.0);
 	if (cover <= 0.001) {
 		return 0.0;
 	}
@@ -109,7 +153,8 @@ float gnd_weather_snow_depth(vec3 world_normal, vec3 world_position) {
 		return 0.0;
 	}
 	float facing_up = smoothstep(0.5, 0.9, normalize(world_normal).y);
-	float depth = gnd_snow_depth * gnd_weather_snow_heaping(world_position.xz);
+	vec4 local = gnd_weather_local(world_position);
+	float depth = gnd_snow_depth * local.r * gnd_weather_snow_kept(local.a, 0.0) * gnd_weather_snow_heaping(world_position.xz);
 	return facing_up * min(depth, GND_SNOW_MAX_DEPTH);
 }
 
@@ -129,7 +174,7 @@ vec3 gnd_weather_snow_normal(vec3 world_normal, vec3 world_position) {
 // hold standing (a paving 1, a soil 0.3, a gravel 0), for a weather that draws it
 void gnd_weather_surface_puddled(inout vec3 surface_albedo, inout float surface_roughness, vec3 world_normal, vec3 world_position, float puddling) {
 	// wet: darker (the water fills the pores) and glossier
-	float wet = clamp(gnd_wetness, 0.0, 1.0);
+	float wet = clamp(gnd_wetness * gnd_weather_local(world_position).g, 0.0, 1.0);
 	surface_albedo *= mix(1.0, 0.62, wet);
 	surface_roughness = mix(surface_roughness, min(surface_roughness, 0.18), wet * 0.85);
 	// soaked, it greys to a glistening slush
@@ -146,15 +191,19 @@ void gnd_weather_surface_puddled(inout vec3 surface_albedo, inout float surface_
 // for its own bumps (its normal map) to go under it. puddling - as for
 // gnd_weather_surface_puddled(). snow_share - how much of the snow on the open ground lies on
 // the surface: 0 none (a road cleared of it), 1 as much, more where it was heaped up (the banks a
-// plough leaves); the wet is the open ground's
-float gnd_weather_apply_snow_share(inout vec3 surface_albedo, inout float surface_roughness, inout vec3 world_normal,
-		vec3 world_position, float puddling, float snow_share) {
+// plough leaves); surface_heat - how much warmer than where it stands the surface is of its own (°C,
+// a material's warm place: a chimney, a boiler room's wall, an engine's cover). The snow and the
+// wet are as much as lies where it is (gnd_weather_local())
+float gnd_weather_apply_heated(inout vec3 surface_albedo, inout float surface_roughness, inout vec3 world_normal,
+		vec3 world_position, float puddling, float snow_share, float surface_heat) {
 	vec3 normal = normalize(world_normal);
 	// before any branch: the derivatives are good only in uniform control flow
 	float footprint = length(fwidth(world_position.xz));
 	vec3 weather_normal = normal;
+	vec4 local = gnd_weather_local(world_position);
+	snow_share *= local.r * gnd_weather_snow_kept(local.a, surface_heat);
 
-	float wet = clamp(gnd_wetness, 0.0, 1.0);
+	float wet = clamp(gnd_wetness * local.g, 0.0, 1.0);
 	surface_albedo *= mix(1.0, 0.62, wet);
 	surface_roughness = mix(surface_roughness, min(surface_roughness, 0.18), wet * 0.85);
 
@@ -185,6 +234,12 @@ float gnd_weather_apply_snow_share(inout vec3 surface_albedo, inout float surfac
 	}
 	world_normal = weather_normal;
 	return snow;
+}
+
+// gnd_weather_apply_heated() with the surface as warm as where it stands
+float gnd_weather_apply_snow_share(inout vec3 surface_albedo, inout float surface_roughness, inout vec3 world_normal,
+		vec3 world_position, float puddling, float snow_share) {
+	return gnd_weather_apply_heated(surface_albedo, surface_roughness, world_normal, world_position, puddling, snow_share, 0.0);
 }
 
 // gnd_weather_apply_snow_share() with as much snow as on the open ground

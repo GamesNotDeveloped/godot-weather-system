@@ -27,8 +27,9 @@ const PROPERTIES: Array[StringName] = [
     &"snow_sway",
     &"snow_wind_drift",
     &"snow_density",
-    &"precipitation_probe_max_count",
-    &"precipitation_probe_distance",
+    &"weather_probe_cell",
+    &"weather_probe_extent",
+    &"weather_probe_seconds",
 ]
 
 

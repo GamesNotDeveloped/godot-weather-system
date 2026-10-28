@@ -2,47 +2,79 @@
 extends Node3D
 class_name PuddleSurface3D
 
-const PUDDLE_SURFACE_SHADER := preload("res://addons/gnd_weather/puddle_surface.gdshader")
-const PROBE_OFFSETS: Array[Vector2] = [
-    Vector2.ZERO,
-    Vector2(-0.35, -0.35),
-    Vector2(0.35, -0.35),
-    Vector2(-0.35, 0.35),
-    Vector2(0.35, 0.35),
-]
+## A puddle: mask_texture's alpha its depth, on mesh (a plane). The weather where it lies is its
+## shader's, from the ground's globals and the weather probes (puddle_surface.gdshader): how full it
+## is, ice over it below freezing, snow on it, the rain's ripples as much as reaches it - nothing of it
+## worked out here, nor every frame. Its properties go to the material as they are set.
 
-@export var mask_texture: Texture2D
+const PUDDLE_SURFACE_SHADER := preload("res://addons/gnd_weather/puddle_surface.gdshader")
+
+@export var mask_texture: Texture2D:
+    set(value):
+        mask_texture = value
+        _sync_render_state()
 @export var mesh: Mesh:
     set(value):
         mesh = value
         if is_inside_tree():
             _ensure_render_resources()
             _sync_render_state()
-@export_range(0.0, 0.2, 0.001) var surface_height_offset: float = 0.078
-@export_range(0.0, 500.0, 0.1) var visibility_range_begin: float = 6.0
-@export_range(0.0, 500.0, 0.1) var visibility_range_end: float = 10.0
-@export_range(0.1, 5.0, 0.05) var probe_interval_sec: float = 0.4
-@export_range(0.0, 2.0, 0.01) var probe_height: float = 0.12
-@export_range(0.1, 20.0, 0.05) var rain_smoothing_speed: float = 10.35
-@export_range(0.0, 1.0, 0.01) var rain_ripple_threshold: float = 0.31
-@export_range(0.0, 1.0, 0.01) var specular_wet: float = 0.75
-@export_range(0.0, 1.0, 0.01) var surface_roughness: float = 0.04
-@export_range(0.0, 1.0, 0.01) var ripple_roughness_reduction: float = 0.02
-@export_range(0.1, 4.0, 0.01) var ripple_speed: float = 0.67
-@export_range(0.1, 10.0, 0.01) var ripple_scale: float = 0.1
-@export_range(0.0, 5.0, 0.01) var ripple_max_radius: float = 1.0
-@export_range(0.0, 2.0, 0.01) var ripple_intensity: float = 0.9
-@export_range(0.0, 1.0, 0.01) var edge_foam_strength: float = 0.08
-@export_range(0.0, 8.0, 0.01) var normal_strength: float = 1.0
-@export_range(0.0, 1.0, 0.01) var puddle_alpha_cutoff: float = 0.07
-
-var _probe_timer := 0.0
-var _target_rain_strength := 0.0
-var _current_rain_strength := 0.0
-# the ground's state from the weather: how full the puddle is, frozen, under snow
-var _water_level := 1.0
-var _frozen := 0.0
-var _snow_cover := 0.0
+@export_range(0.0, 0.2, 0.001) var surface_height_offset: float = 0.078:
+    set(value):
+        surface_height_offset = value
+        _sync_render_state()
+@export_range(0.0, 500.0, 0.1) var visibility_range_begin: float = 6.0:
+    set(value):
+        visibility_range_begin = value
+        _sync_render_state()
+@export_range(0.0, 500.0, 0.1) var visibility_range_end: float = 10.0:
+    set(value):
+        visibility_range_end = value
+        _sync_render_state()
+@export_range(0.0, 1.0, 0.01) var rain_ripple_threshold: float = 0.31:
+    set(value):
+        rain_ripple_threshold = value
+        _sync_render_state()
+@export_range(0.0, 1.0, 0.01) var specular_wet: float = 0.75:
+    set(value):
+        specular_wet = value
+        _sync_render_state()
+@export_range(0.0, 1.0, 0.01) var surface_roughness: float = 0.04:
+    set(value):
+        surface_roughness = value
+        _sync_render_state()
+@export_range(0.0, 1.0, 0.01) var ripple_roughness_reduction: float = 0.02:
+    set(value):
+        ripple_roughness_reduction = value
+        _sync_render_state()
+@export_range(0.1, 4.0, 0.01) var ripple_speed: float = 0.67:
+    set(value):
+        ripple_speed = value
+        _sync_render_state()
+@export_range(0.1, 10.0, 0.01) var ripple_scale: float = 0.1:
+    set(value):
+        ripple_scale = value
+        _sync_render_state()
+@export_range(0.0, 5.0, 0.01) var ripple_max_radius: float = 1.0:
+    set(value):
+        ripple_max_radius = value
+        _sync_render_state()
+@export_range(0.0, 2.0, 0.01) var ripple_intensity: float = 0.9:
+    set(value):
+        ripple_intensity = value
+        _sync_render_state()
+@export_range(0.0, 1.0, 0.01) var edge_foam_strength: float = 0.08:
+    set(value):
+        edge_foam_strength = value
+        _sync_render_state()
+@export_range(0.0, 8.0, 0.01) var normal_strength: float = 1.0:
+    set(value):
+        normal_strength = value
+        _sync_render_state()
+@export_range(0.0, 1.0, 0.01) var puddle_alpha_cutoff: float = 0.07:
+    set(value):
+        puddle_alpha_cutoff = value
+        _sync_render_state()
 
 var _material: ShaderMaterial
 var _instance_rid: RID
@@ -52,28 +84,12 @@ func _ready() -> void:
     set_notify_transform(true)
     _ensure_render_resources()
     _sync_render_state()
-    _probe_timer = 0.0
-    set_process(true)
 
 
 func _exit_tree() -> void:
     if _instance_rid.is_valid():
         RenderingServer.free_rid(_instance_rid)
         _instance_rid = RID()
-
-
-func _process(delta: float) -> void:
-    _probe_timer -= delta
-    if _probe_timer <= 0.0:
-        _probe_timer = maxf(probe_interval_sec, 0.1)
-        _sample_local_rain()
-
-    _current_rain_strength = move_toward(
-        _current_rain_strength,
-        _target_rain_strength,
-        maxf(rain_smoothing_speed, 0.1) * delta
-    )
-    _sync_render_state()
 
 
 func _notification(what: int) -> void:
@@ -118,10 +134,6 @@ func _sync_render_state() -> void:
     RenderingServer.instance_set_transform(_instance_rid, render_transform)
 
     _material.set_shader_parameter("mask_texture", mask_texture)
-    _material.set_shader_parameter("rain_strength", _current_rain_strength)
-    _material.set_shader_parameter("water_level", _water_level)
-    _material.set_shader_parameter("frozen", _frozen)
-    _material.set_shader_parameter("snow_cover", _snow_cover)
     _material.set_shader_parameter("rain_ripple_threshold", rain_ripple_threshold)
     _material.set_shader_parameter("puddle_alpha_cutoff", puddle_alpha_cutoff)
     _material.set_shader_parameter("visibility_range_begin", visibility_range_begin)
@@ -137,53 +149,5 @@ func _sync_render_state() -> void:
     _material.set_shader_parameter("normal_strength", normal_strength)
 
 
-func _sample_local_rain() -> void:
-    if mesh == null:
-        _target_rain_strength = 0.0
-        return
-    var world_3d := get_world_3d()
-    if world_3d == null:
-        _target_rain_strength = 0.0
-        return
-
-    var weather_state := WeatherServer.get_weather_state(world_3d)
-    var base_strength: float = clampf(float(weather_state.get("global_precipitation", 0.0)), 0.0, 1.0)
-    # it fills with the standing water (a weather without the ground model leaves it full), freezes
-    # below zero and goes under the snow; only the rain's share makes ripples
-    _water_level = clampf(float(weather_state.get("puddles", 1.0)), 0.0, 1.0) if weather_state.has("puddles") else 1.0
-    _frozen = 1.0 - clampf(float(weather_state.get("air_temperature", 10.0)) + 0.5, 0.0, 1.0)
-    _snow_cover = clampf(float(weather_state.get("snow_cover", 0.0)), 0.0, 1.0)
-    var rain_share := 1.0 - clampf(float(weather_state.get("snow_fraction", 0.0)), 0.0, 1.0)
-    var total := 0.0
-    for probe_offset in PROBE_OFFSETS:
-        total += WeatherServer.get_precipitation_participation_strength(
-            world_3d,
-            _get_probe_world_position(probe_offset),
-            base_strength
-        )
-    _target_rain_strength = clampf(total / float(PROBE_OFFSETS.size()) * rain_share * (1.0 - _frozen), 0.0, 1.0)
-
-
-func _get_probe_world_position(offset: Vector2) -> Vector3:
-    var basis := global_transform.basis.orthonormalized()
-    var footprint := _get_probe_footprint_size()
-    var half_width := footprint.x * 0.5
-    var half_depth := footprint.y * 0.5
-    var world_position := global_transform.origin
-    world_position += basis.x * (offset.x * half_width)
-    world_position += basis.z * (offset.y * half_depth)
-    world_position.y += probe_height + surface_height_offset
-    return world_position
-
-
 func _get_render_mesh() -> Mesh:
     return mesh
-
-
-func _get_probe_footprint_size() -> Vector2:
-    if mesh == null:
-        return Vector2(0.1, 0.1)
-    var aabb := mesh.get_aabb()
-    var width := maxf(absf(aabb.size.x), 0.1)
-    var depth := maxf(absf(aabb.size.z), 0.1)
-    return Vector2(width, depth)

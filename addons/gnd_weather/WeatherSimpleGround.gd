@@ -105,6 +105,33 @@ func get_drying(state: Dictionary, hours: float, temperature: float) -> float:
         * hours)
 
 
+## The snowfall's water settling on the ground in an hour (mm): a sleet's melts as it lands above
+## freezing
+func get_snowfall_water(state: Dictionary, snowfall: float, temperature: float) -> float:
+    var settling := 1.0 - clampf((temperature - 1.0) / 2.0, 0.0, 1.0)
+    return snowfall * settling * float(state.get("snowfall_depth_per_hour", 0.06)) * WeatherServer.REFERENCE_SNOW_DENSITY * 1000.0
+
+
+## The snow's water a degree of the air's warmth melts in an hour (mm): snow_melt_rate, more in a wind
+func get_snow_melt_per_degree(state: Dictionary) -> float:
+    return float(state.get("snow_melt_rate", 0.17)) * (1.0 + WeatherServer.get_state_wind_speed(state) / 4.0)
+
+
+func get_probe_rates(state: Dictionary) -> Dictionary:
+    var precipitation := clampf(float(state.get("global_precipitation", 0.0)), 0.0, 1.0)
+    var snow := clampf(float(state.get("snow_fraction", 0.0)), 0.0, 1.0)
+    var temperature := float(state.get("air_temperature", 10.0))
+    var density := float(state.get("snow_density", WeatherServer.SETTLED_SNOW_DENSITY))
+    return {
+        "rain_mm": get_rain_mm(state, precipitation * (1.0 - snow)),
+        "snow_fall": get_snowfall_water(state, precipitation * snow, temperature) / (get_fresh_snow_density(temperature) * 1000.0),
+        "melt_per_degree": get_snow_melt_per_degree(state) / (density * 1000.0),
+        "drying_mm": get_drying(state, 1.0, temperature),
+        "wet": float(state.get("wetness", 0.0)),
+        "snow": float(state.get("snow_depth", 0.0)),
+    }
+
+
 ## How dense a snowfall lies as it settles, of the water's: a frost's dry powder some 0.07, a snow
 ## falling about freezing twice that (Hedstrom and Pomeroy), a wet one above it heavier still
 static func get_fresh_snow_density(temperature: float) -> float:
@@ -130,9 +157,8 @@ func advance_snow(state: Dictionary, hours: float, snowfall: float, rain_mm: flo
     var wetness := float(state.get("snow_wetness", 0.0))
     var depth := water / (density * 1000.0) if water > 0.0 else 0.0
 
-    # the new snow on the old: a sleet's melts as it lands above freezing
-    var settling := 1.0 - clampf((temperature - 1.0) / 2.0, 0.0, 1.0)
-    var fallen := snowfall * settling * hours * float(state.get("snowfall_depth_per_hour", 0.06)) * WeatherServer.REFERENCE_SNOW_DENSITY * 1000.0
+    # the new snow on the old
+    var fallen := get_snowfall_water(state, snowfall, temperature) * hours
     if fallen > 0.0:
         depth += fallen / (get_fresh_snow_density(temperature) * 1000.0)
         water += fallen
@@ -143,8 +169,7 @@ func advance_snow(state: Dictionary, hours: float, snowfall: float, rain_mm: flo
     wetness -= hours * (0.3 + maxf(-temperature, 0.0) * 0.5)
     var melt := 0.0
     if temperature > 0.0 and water > 0.0:
-        var wind := WeatherServer.get_state_wind_speed(state)
-        var air := float(state.get("snow_melt_rate", 0.17)) * temperature * (1.0 + wind / 4.0)
+        var air := get_snow_melt_per_degree(state) * temperature
         var rain_heat := rain_mm * temperature / 80.0
         melt = minf(water, (air + rain_heat) * hours)
         water -= melt

@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://props/platform.tscn" id="5_g6u38"]
 [ext_resource type="PackedScene" path="res://props/house.tscn" id="6_t62nm"]
 [ext_resource type="PackedScene" path="res://props/tree.tscn" id="7_aqh7y"]
+[ext_resource type="PackedScene" path="res://props/puddle.tscn" id="8_8nmif"]
 [ext_resource type="ArrayMesh" path="res://props/forest_tree_mesh.res" id="9_mcdut"]
 [ext_resource type="Script" path="res://addons/free_look_camera/free_look_camera.gd" id="10_o0f5x"]
 [ext_resource type="Script" path="res://addons/gnd_weather/WeatherNode.gd" id="11_jvwcr"]
@@ -151,6 +152,17 @@ transform = Transform3D(0.953377, 0, -0.48576987, 0, 1.07, 0, 0.48576987, 0, 0.9
 
 [node name="Forest" type="MultiMeshInstance3D" parent="." unique_id=665329541]
 multimesh = SubResource("MultiMesh_2jwgm")
+
+[node name="Puddles" type="Node3D" parent="." unique_id=473143292]
+
+[node name="PuddleByThePlatform" parent="Puddles" unique_id=1738118484 instance=ExtResource("8_8nmif")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.5, 0, 2.5)
+
+[node name="PuddleByTheTrack" parent="Puddles" unique_id=843584959 instance=ExtResource("8_8nmif")]
+transform = Transform3D(0.60621774, 0, 0.35, 0, 0.7, 0, -0.35, 0, 0.60621774, 5, 0, 5)
+
+[node name="PuddleOnTheGreen" parent="Puddles" unique_id=1754091043 instance=ExtResource("8_8nmif")]
+transform = Transform3D(1.2216004, 0, -0.44462615, 0, 1.3, 0, 0.44462615, 0, 1.2216004, -8, 0, -3)
 
 [node name="Camera" type="Camera3D" parent="." unique_id=857367973]
 transform = Transform3D(0.99026805, 0.012129734, -0.13864352, 0, 0.9961947, 0.08715574, 0.1391731, -0.08630754, 0.9864998, -1.5, 1.75, 11)

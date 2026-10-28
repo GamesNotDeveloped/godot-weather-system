@@ -64,6 +64,30 @@ gnd_rain={
 "type": "float",
 "value": 0.0
 }
+gnd_puddles={
+"type": "float",
+"value": 1.0
+}
+gnd_weather_ground={
+"type": "sampler3D",
+"value": ""
+}
+gnd_weather_probes={
+"type": "sampler3D",
+"value": ""
+}
+gnd_weather_probe_origin={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+gnd_weather_probe_size={
+"type": "vec3",
+"value": Vector3(1, 1, 1)
+}
+gnd_weather_probes_enabled={
+"type": "float",
+"value": 0.0
+}
 gnd_air_temperature={
 "type": "float",
 "value": 10.0

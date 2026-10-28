@@ -14,6 +14,24 @@ uniform mat4 exclusion_inverse_transforms[MAX_EXCLUSIONS];
 uniform vec3 exclusion_half_sizes[MAX_EXCLUSIONS];
 uniform int exclusion_enclosed_mask = 0;
 
+// The weather probes (WeatherNode, WeatherProbes): how much of the precipitation reaches each, by
+// every volume about them - its delta, multiplier and feathered edge - in a lattice fixed in the
+// world, addressed round in the texture; the window's corner and size, set as it moves
+uniform sampler3D weather_probes : filter_linear, repeat_enable;
+uniform vec3 weather_probe_origin = vec3(0.0);
+uniform vec3 weather_probe_size = vec3(1.0);
+uniform bool weather_probes_enabled = false;
+
+// How much of the precipitation reaches world_position (0 - 1): the probes', blended between them; all
+// of it out of their window or without them
+float precipitation_reach(vec3 world_position) {
+	vec3 in_window = (world_position - weather_probe_origin) / weather_probe_size;
+	if (!weather_probes_enabled || any(lessThan(in_window, vec3(0.0))) || any(greaterThan(in_window, vec3(1.0)))) {
+		return 1.0;
+	}
+	return clamp(texture(weather_probes, world_position / weather_probe_size).r, 0.0, 1.0);
+}
+
 // world_position - the drop's or the flake's; velocity - its flight (world space, any length)
 bool precipitation_sheltered(vec3 world_position, vec3 velocity) {
 	for (int i = 0; i < MAX_EXCLUSIONS; i++) {

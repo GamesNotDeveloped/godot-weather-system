@@ -263,18 +263,26 @@ enum TemperatureUnit { CELSIUS, FAHRENHEIT }
 @export_range(0.1, 4.0, 0.05) var mid_field_spacing: float = 1.35
 @export_range(0.0, 1.0, 0.01) var near_field_jitter: float = 0.38
 @export_range(0.0, 1.0, 0.01) var mid_field_jitter: float = 0.48
-@export_range(1, 256, 1) var precipitation_probe_max_count: int = 24:
+@export_group("Weather probes", "weather_probe")
+## How far apart the weather probes are, in metres: a lattice of them fixed in the world about the
+## camera (WeatherProbes), how much of the precipitation reaches each, its temperature and humidity,
+## and the ground at it over time - a few metres is enough, the materials blend between them
+@export_range(0.5, 16.0, 0.1, "suffix:m") var weather_probe_cell: float = 2.0:
     set(value):
-        precipitation_probe_max_count = maxi(value, 1)
+        weather_probe_cell = maxf(value, 0.5)
         if is_inside_tree():
-            _push_precipitation_probe_config()
-            _refresh_editor_preview()
-@export_range(0.1, 100.0, 0.1) var precipitation_probe_distance: float = 8.0:
+            _setup_weather_probes()
+## How far the probes reach about the camera, in metres (each way the half of it): out of them, the
+## open ground's weather
+@export var weather_probe_extent: Vector3 = Vector3(128.0, 32.0, 128.0):
     set(value):
-        precipitation_probe_distance = maxf(value, 0.1)
+        weather_probe_extent = value.max(Vector3.ONE * 8.0)
         if is_inside_tree():
-            _push_precipitation_probe_config()
-            _refresh_editor_preview()
+            _setup_weather_probes()
+## How often the probes are worked out (seconds of the game's time) - at once as a heat source or a
+## volume changes or the camera leaves their middle
+@export_range(0.1, 10.0, 0.1, "suffix:s") var weather_probe_seconds: float = 0.5
+@export_group("Precipitation")
 @export_group("Rain")
 ## How fast the rain falls
 @export_range(1.0, 80.0, 0.1) var base_fall_speed: float = 26.0
@@ -540,6 +548,15 @@ var _snow_flight: Vector3 = Vector3.ZERO
 var _weather_tick: Timer
 var _lightning_tween: Tween
 var _skydome_wind: Vector3 = Vector3(INF, INF, INF)
+# the weather probes (none without a RenderingDevice), how long since they were worked out, and
+# whether they must be at once
+var _weather_probes: WeatherProbes
+var _weather_probes_elapsed: float = INF
+var _weather_probes_dirty: bool = true
+# the probes' textures stand on the GPU and are the materials' (WeatherProbes.textures_created)
+var _weather_probes_created: bool = false
+# whether the materials read the probes (gnd_weather_probes_enabled, weather_probes_enabled)
+var _weather_probes_shown: bool = false
 # The flakes fall TIME * their speed less this offset, taken up as the speed changes so that none
 # moves: TIME * the new speed alone moved every flake by the whole time it had snowed, up into the
 # sky as a sleet turned to snow. The speed it was taken for, -1 none yet
@@ -612,8 +629,9 @@ func _ready() -> void:
     if snow_depth < snow_cover * WeatherServer.SNOW_COVER_DEPTH:
         ground["snow_cover"] = snow_cover
     _push_ground_state(ground)
-    _push_precipitation_probe_config()
+    _push_precipitation_volume_reach()
     _ensure_precipitation_field_nodes()
+    _setup_weather_probes()
     _apply_weather_state(true)
     _weather_tick = Timer.new()
     _weather_tick.wait_time = WEATHER_TICK_SECONDS
@@ -625,12 +643,31 @@ func _ready() -> void:
 func _enter_tree() -> void:
     if not WeatherServer.precipitation_volumes_moved.is_connected(_on_precipitation_volumes_moved):
         WeatherServer.precipitation_volumes_moved.connect(_on_precipitation_volumes_moved)
+    if not WeatherServer.heat_sources_changed.is_connected(_on_heat_sources_changed):
+        WeatherServer.heat_sources_changed.connect(_on_heat_sources_changed)
+    # back in the tree: its probes, let go of as it left it
+    if is_node_ready() and _weather_probes == null:
+        _setup_weather_probes()
 
 
 func _exit_tree() -> void:
     if WeatherServer.precipitation_volumes_moved.is_connected(_on_precipitation_volumes_moved):
         WeatherServer.precipitation_volumes_moved.disconnect(_on_precipitation_volumes_moved)
+    if WeatherServer.heat_sources_changed.is_connected(_on_heat_sources_changed):
+        WeatherServer.heat_sources_changed.disconnect(_on_heat_sources_changed)
     _invalidate_precipitation_lattices()
+    if _weather_probes != null:
+        # the materials let go of the textures before their GPU textures go
+        WeatherServer.set_ground_global(WeatherServer.WEATHER_PROBES_ENABLED_GLOBAL, 0.0)
+        WeatherServer.set_ground_global(WeatherServer.WEATHER_GROUND_GLOBAL, null)
+        WeatherServer.set_ground_global(WeatherServer.WEATHER_PROBES_GLOBAL, null)
+        for mesh in _get_precipitation_meshes():
+            mesh.set_shader_parameter(&"weather_probes_enabled", false)
+            mesh.set_shader_parameter(&"weather_probes", null)
+        _weather_probes.release()
+        _weather_probes = null
+        _weather_probes_created = false
+        _weather_probes_shown = false
     # the Environment gets the fog it had before the snow
     var environment := _get_environment()
     if _environment_fog_saved and environment != null:
@@ -640,8 +677,6 @@ func _exit_tree() -> void:
     _clear_thunder_lock()
     WeatherServer.clear_weather_observer_sample(get_world_3d())
     WeatherServer.clear_weather_state(get_world_3d())
-    WeatherServer.clear_visible_precipitation_participation_cache(get_world_3d(), get_instance_id())
-    WeatherServer.clear_visible_precipitation_probe_field_config(get_world_3d(), get_instance_id())
     var skydome := _get_skydome()
     if skydome:
         skydome.clouds_coverage = 0.0
@@ -666,6 +701,7 @@ func _on_weather_tick() -> void:
     _update_precipitation_rendering()
     WeatherServer.get_ground_model(get_world_3d()).process(self, delta)
     _push_weather_state()
+    _update_weather_probes(delta)
 
 
 func set_precipitation_intensity(value: float) -> void:
@@ -807,7 +843,7 @@ func _refresh_editor_preview() -> void:
         return
     _invalidate_precipitation_lattices()
     _push_weather_server_settings()
-    _push_precipitation_probe_config()
+    _push_precipitation_volume_reach()
     _apply_weather_state(true)
 
 
@@ -870,18 +906,144 @@ func _refresh_environment_cache() -> void:
     _environment = world_3d.environment if world_3d != null else null
 
 
-func _push_precipitation_probe_config() -> void:
-    WeatherServer.configure_visible_precipitation_probe_field(
-        get_world_3d(),
-        get_instance_id(),
-        precipitation_probe_max_count,
-        precipitation_probe_distance
-    )
+## How far about the observer the volumes count for its own queries (the shelters the shaders cull
+## exactly, the precipitation where it stands): as far as the precipitation drawn about it
+func _push_precipitation_volume_reach() -> void:
     WeatherServer.set_precipitation_volume_active_distance(
-        get_world_3d(),
-        maxf(precipitation_probe_distance, maxf(near_emission_extents.length(), mid_emission_extents.length()))
-    )
+        get_world_3d(), maxf(near_emission_extents.length(), mid_emission_extents.length()))
     _invalidate_precipitation_lattices()
+
+
+## The weather probes made for weather_probe_cell and weather_probe_extent, as they change (none
+## without a RenderingDevice: the materials take the open ground's weather then)
+func _setup_weather_probes() -> void:
+    if not WeatherProbes.is_supported():
+        WeatherServer.set_ground_global(WeatherServer.WEATHER_PROBES_ENABLED_GLOBAL, 0.0)
+        return
+    if _weather_probes == null:
+        _weather_probes = WeatherProbes.new()
+        _weather_probes.textures_created.connect(_on_weather_probe_textures_created)
+    _weather_probes_created = false
+    if _weather_probes_shown:
+        _weather_probes_shown = false
+        WeatherServer.set_ground_global(WeatherServer.WEATHER_PROBES_ENABLED_GLOBAL, 0.0)
+        for mesh in _get_precipitation_meshes():
+            mesh.set_shader_parameter(&"weather_probes_enabled", false)
+    _weather_probes.setup(_get_weather_probe_dims())
+    _weather_probes_dirty = true
+    _weather_probes_elapsed = INF
+    _place_weather_probes(true)
+
+
+## The probes' textures stand on the GPU: given to the materials, the probes for them from now
+func _on_weather_probe_textures_created() -> void:
+    if _weather_probes == null:
+        return
+    _weather_probes_created = true
+    WeatherServer.set_ground_global(WeatherServer.WEATHER_GROUND_GLOBAL, _weather_probes.ground_texture)
+    WeatherServer.set_ground_global(WeatherServer.WEATHER_PROBES_GLOBAL, _weather_probes.probes_texture)
+    WeatherServer.set_ground_global(WeatherServer.WEATHER_PROBE_SIZE_GLOBAL, Vector3(_get_weather_probe_dims()) * weather_probe_cell)
+    for mesh in _get_precipitation_meshes():
+        mesh.set_shader_parameter(&"weather_probes", _weather_probes.probes_texture)
+        mesh.set_shader_parameter(&"weather_probe_size", Vector3(_get_weather_probe_dims()) * weather_probe_cell)
+    _weather_probes_dirty = true
+
+
+## Where the probes stand now, every step-th of them each way (the editor's preview of them)
+func get_weather_probe_positions(step: int = 1) -> PackedVector3Array:
+    var positions := PackedVector3Array()
+    if _weather_probes == null:
+        return positions
+    var dims := _get_weather_probe_dims()
+    var base := _weather_probes.get_base()
+    step = maxi(step, 1)
+    for x in range(0, dims.x, step):
+        for y in range(0, dims.y, step):
+            for z in range(0, dims.z, step):
+                positions.append((Vector3(base + Vector3i(x, y, z)) + Vector3.ONE * 0.5) * weather_probe_cell)
+    return positions
+
+
+func _get_weather_probe_dims() -> Vector3i:
+    return Vector3i((weather_probe_extent / weather_probe_cell).ceil()).max(Vector3i.ONE * 4)
+
+
+## The probes' window about the camera, moved by whole cells once the camera leaves its middle half:
+## its corner given to the materials only then. Returns whether it moved
+func _place_weather_probes(force: bool = false) -> bool:
+    var follow_target := _get_follow_target()
+    if _weather_probes == null or follow_target == null:
+        return false
+    var dims := _get_weather_probe_dims()
+    var camera_cell := Vector3i((follow_target.global_position / weather_probe_cell).floor())
+    var base := _weather_probes.get_base()
+    var off_middle := (camera_cell - (base + dims / 2)).abs()
+    if not force and off_middle.x <= dims.x / 4 and off_middle.y <= dims.y / 4 and off_middle.z <= dims.z / 4:
+        return false
+    base = camera_cell - dims / 2
+    _weather_probes.set_base(base)
+    var origin := Vector3(base) * weather_probe_cell
+    WeatherServer.set_ground_global(WeatherServer.WEATHER_PROBE_ORIGIN_GLOBAL, origin)
+    for mesh in _get_precipitation_meshes():
+        mesh.set_shader_parameter(&"weather_probe_origin", origin)
+    return true
+
+
+## The probes worked out on the weather's tick: every weather_probe_seconds, and at once as their
+## window moves or a heat source or a volume changes - the heat sources asked then, the ground at
+## them gone on by the time since
+func _update_weather_probes(delta: float) -> void:
+    if _weather_probes == null:
+        return
+    _weather_probes_elapsed += delta
+    var moved := _place_weather_probes()
+    if not moved and not _weather_probes_dirty and _weather_probes_elapsed < weather_probe_seconds:
+        return
+    var world_3d := get_world_3d()
+    var state := WeatherServer.get_weather_state(world_3d)
+    var rates: Dictionary = WeatherServer.get_ground_model(world_3d).get_probe_rates(state)
+    var dims := _get_weather_probe_dims()
+    var origin := Vector3(_weather_probes.get_base()) * weather_probe_cell
+    var region := AABB(origin, Vector3(dims) * weather_probe_cell)
+    var air := get_air_temperature_celsius()
+    # the way it falls: the rain's and the snow's, as much of each as falls
+    var snow := clampf(_current_snow_fraction, 0.0, 1.0)
+    var snow_flight := get_snow_flight()
+    var fall := _get_rain_direction(_get_wind_speed(), _get_precipitation_heaviness()).lerp(
+        snow_flight.normalized() if snow_flight.length_squared() > 0.0001 else Vector3.DOWN, snow).normalized()
+    var params := PackedFloat32Array()
+    params.resize(WeatherProbes.Param.COUNT)
+    params[WeatherProbes.Param.CELL] = weather_probe_cell
+    params[WeatherProbes.Param.FALL_X] = fall.x
+    params[WeatherProbes.Param.FALL_Y] = fall.y
+    params[WeatherProbes.Param.FALL_Z] = fall.z
+    params[WeatherProbes.Param.AIR_TEMPERATURE] = air
+    params[WeatherProbes.Param.HUMIDITY] = clampf(air_humidity, 0.0, 1.0)
+    params[WeatherProbes.Param.HOURS] = (0.0 if is_inf(_weather_probes_elapsed) else _weather_probes_elapsed) \
+            * weather_time_scale / WeatherServer.SECONDS_PER_HOUR
+    params[WeatherProbes.Param.RAIN_MM] = float(rates.get("rain_mm", 0.0))
+    params[WeatherProbes.Param.SNOW_FALL] = float(rates.get("snow_fall", 0.0))
+    params[WeatherProbes.Param.OPEN_WET] = float(rates.get("wet", 0.0))
+    params[WeatherProbes.Param.OPEN_SNOW] = float(rates.get("snow", 0.0))
+    params[WeatherProbes.Param.OPEN_WATER] = float(rates.get("water", 0.0))
+    params[WeatherProbes.Param.WET_FILM] = WeatherServer.WET_FILM_MM
+    params[WeatherProbes.Param.MELT_PER_DEGREE] = float(rates.get("melt_per_degree", 0.0))
+    params[WeatherProbes.Param.DRYING_MM] = float(rates.get("drying_mm", 0.0))
+    _weather_probes.update(params, WeatherServer.get_precipitation_volumes_packed(world_3d, region),
+        WeatherServer.get_heat_sources(world_3d, region))
+    # the materials read them once they have the textures and the probes in them
+    if _weather_probes_created != _weather_probes_shown:
+        _weather_probes_shown = _weather_probes_created
+        WeatherServer.set_ground_global(WeatherServer.WEATHER_PROBES_ENABLED_GLOBAL, 1.0 if _weather_probes_shown else 0.0)
+        for mesh in _get_precipitation_meshes():
+            mesh.set_shader_parameter(&"weather_probes_enabled", _weather_probes_shown)
+    _weather_probes_elapsed = 0.0
+    _weather_probes_dirty = false
+
+
+func _on_heat_sources_changed(world_3d: World3D) -> void:
+    if world_3d == get_world_3d():
+        _weather_probes_dirty = true
 
 
 func _push_weather_server_settings() -> void:
@@ -1232,7 +1394,8 @@ func _ensure_precipitation_debug_materials(near_tint: Color, mid_tint: Color) ->
     _mid_precipitation_debug_material.emission = mid_tint
 
 
-## A shelter moved (PrecipitationVolume): the shaders take its box as it is now
+## A shelter moved (PrecipitationVolume): the shaders take its box as it is now, the probes it on
+## their next tick
 func _on_precipitation_volumes_moved(world_3d: World3D) -> void:
     if is_inside_tree() and world_3d == get_world_3d():
         _push_precipitation_exclusion_volumes()
@@ -1707,15 +1870,6 @@ func _get_precipitation_field_spacing(base_spacing: float, camera: Camera3D = nu
         / sqrt(maxf(precipitation_mesh_density * 4.0, 0.1)),
         0.1
     )
-    var probe_spacing := -1.0
-    if camera != null:
-        probe_spacing = WeatherServer.get_configured_visible_precipitation_probe_spacing(
-            get_world_3d(),
-            get_instance_id(),
-            camera
-        )
-    if probe_spacing > 0.0:
-        spacing = minf(spacing, probe_spacing * PRECIPITATION_FIELD_COUNT_REDUCTION_SPACING_SCALE)
     return maxf(spacing, 0.1)
 
 

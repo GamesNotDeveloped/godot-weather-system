@@ -136,11 +136,14 @@ wind's globals keep theirs.
 
 `PuddleSurface3D`: a `mesh` (a plane) and a `mask_texture` whose alpha is the puddle's depth - a
 round gradient will do: its shore wanders and its bottom is uneven (`shore_irregularity`,
-`shore_scale`), each puddle its own, so it dries into a few smaller ones. It fills with a ground
-model's standing water (`puddles`), ripples with the rain's share of the precipitation where it lies (a shelter over it keeps the
-ripples off), freezes to a still sheet below 0 °C and goes under the snow. It is opaque, so the
-screen-space reflections take it in (it no longer refracts what is under it:
-`refraction_strength` and `refraction_mix` are gone).
+`shore_scale`), each puddle its own, so it dries into a few smaller ones. Its shader takes the
+weather where it lies, from the ground's globals and the weather probes, nothing of it worked out
+on the CPU nor every frame: it fills with a ground model's standing water (`gnd_puddles`, full
+without one) as much as stands there, ripples with the rain (`gnd_rain`) as much of it as reaches it
+(a shelter over it keeps the ripples off), freezes to a still sheet below 0 °C there - a heat source
+keeps it open - and goes under the snow lying there. It reads the globals by their `gnd_` names:
+it is for a project without `gnd_weather/ground_globals_prefix`. It is opaque, so the screen-space reflections take it in
+(it no longer refracts what is under it: `refraction_strength` and `refraction_mix` are gone).
 
 ## Shelters
 
@@ -152,6 +155,33 @@ blows the snow. The sixteen
 nearest the camera are culled exactly in the shaders (`WeatherNode.MAX_PRECIPITATION_EXCLUSION_VOLUMES`),
 each given to them only as it moves; others between -1 and 1 thin the precipitation out or add to it
 where the camera is (`precipitation_multiplier`, `lightning_multiplier`, `edge_feather`).
+
+## Weather probes and heat
+
+A lattice of weather probes stands fixed in the world about the camera (`WeatherNode`'s
+`weather_probe_cell`, 2 m, over `weather_probe_extent`, 128 x 32 x 128 m), worked out by a compute
+shader into two 3D textures on the weather's tick - every `weather_probe_seconds` (0.5), at once as
+their window moves, a shelter or a heat source changes - never every frame. Each probe holds how
+much of the precipitation reaches it (the `PrecipitationVolume`s with their delta, multiplier and
+feathered edge, a roof by the way the rain or the snow comes), its temperature, its humidity and
+the lightning's multiplier; the ground at it keeps, over time, its share of the open ground's
+snow, wet and standing water. The shelters thin the precipitation in the shaders by them, and
+`weather_surface.gdshaderinc` lays the snow and the wet by them: none under a roof, none where it is
+warm, the edges soft. They are in the shader globals `gnd_weather_ground` (a `sampler3D`: the
+snow's, the wet's and the standing water's shares, the temperature), `gnd_weather_probes` (the
+precipitation reaching each probe, its temperature, humidity, the lightning's multiplier),
+`gnd_weather_probe_origin`, `gnd_weather_probe_size` and `gnd_weather_probes_enabled`, for shaders of
+your own (`gnd_weather_local()`, `gnd_weather_probe_blend()`). Without a `RenderingDevice` (the Compatibility renderer) there are none:
+the open ground's weather everywhere.
+
+A heat source warms (or cools) the air, the ground and what stands about it: a sphere or a box,
+1 inside and smoothly nothing `falloff` metres out of it, the temperature there `T_air + sum(weight * level * (temperature - T_air))`, kept between the air's and the sources'.
+Warmer, the air is drier and the snow does not lie. `WeatherHeatSource3D` is one in the scene; a
+game's own (its vehicles' engines, its buildings) come from a `WeatherHeatProvider` of its own
+(`WeatherServer.add_heat_provider(world, provider)`), asked for those about the probes as they are
+worked out: `get_heat_sources(world, region)` packs each with `WeatherHeatProvider.pack()`, and
+`heat_sources_changed` asks the probes to be worked out again at once. A material warm of its own
+(a chimney, an engine's cover) gives `gnd_weather_apply_heated()` its `surface_heat`.
 
 ## The wind for the vegetation
 
@@ -216,7 +246,10 @@ year round in the southern hemisphere, summer all the year between the tropics.
 | `RainVolume` | `PrecipitationVolume` |
 | `rain_strength_changed(strength)` | `precipitation_strength_changed(strength, snow)` |
 | `rain_local_strength_changed(strength)` | `precipitation_local_strength_changed(strength, snow)` |
-| `rain_mesh_density`, `rain_probe_max_count`, `rain_probe_distance` (and their `gnd_weather/*` project settings) | `precipitation_mesh_density`, `precipitation_probe_*` |
+| `rain_mesh_density`, `rain_probe_max_count`, `rain_probe_distance` (and their `gnd_weather/*` project settings) | `precipitation_mesh_density`; the probes: `weather_probe_*` |
+| `precipitation_probe_max_count`, `precipitation_probe_distance` (and their `gnd_weather/*` project settings) | `weather_probe_cell`, `weather_probe_extent`, `weather_probe_seconds`: a lattice of probes on the GPU |
+| `WeatherServer.*visible_precipitation_probe*`, `*visible_precipitation_participation*` | none: the weather probes (`gnd_weather_ground`, `gnd_weather_local()`) |
+| `PuddleSurface3D`'s `probe_interval_sec`, `probe_height`, `rain_smoothing_speed`; `puddle_surface.gdshader`'s `rain_strength`, `water_level`, `frozen`, `snow_cover` | none: its shader takes them from the globals (`gnd_rain`, `gnd_puddles`, `gnd_snow_cover`) and the probes (`gnd_weather_probes`, `gnd_weather_ground`) |
 | `WeatherServer.*rain*` (volumes, probes, participation) | `WeatherServer.*precipitation*` |
 | `WeatherServer.get_precipitation_render_field_state()`, `clear_precipitation_render_field_cache()`; `PrecipitationMesh.get_field_state()`, `invalidate_field_cache()`, `get_layer_key()` | none: the layers are lattices the shaders wrap round the camera |
 | the snow shader's `camera_position`, `drift` | none (the camera's place from `INV_VIEW_MATRIX`, `view_origin_negated` in a double precision build), `drift_offset` |

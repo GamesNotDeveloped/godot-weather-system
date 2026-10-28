@@ -3,15 +3,21 @@ shader_type spatial;
 // opaque, so the screen-space reflections take it in: a puddle is a mirror more than a window
 render_mode depth_draw_opaque, cull_disabled, diffuse_burley, specular_schlick_ggx;
 
+// the weather where it lies, all of it from the globals and the probes (nothing set every frame):
+// how full it is, ice over it, snow on it, the rain on it
+#include "res://addons/gnd_weather/weather_surface.gdshaderinc"
+// the rain falling on the ground (its share of the precipitation), the snow's cover, how full the
+// puddles are (a ground model of standing water's, 1 without one; past 1 flooding)
+global uniform float gnd_rain;
+global uniform float gnd_snow_cover;
+global uniform float gnd_puddles;
+// the weather probes: how much of the precipitation reaches each (r) - a shelter over it keeps the
+// ripples off
+global uniform sampler3D gnd_weather_probes : filter_linear, repeat_enable;
+
 uniform sampler2D mask_texture : source_color, filter_linear_mipmap, repeat_disable;
 uniform vec4 shallow_color : source_color = vec4(0.11, 0.15, 0.13, 1.0);
 uniform vec4 deep_color : source_color = vec4(0.03, 0.06, 0.07, 1.0);
-uniform float rain_strength : hint_range(0.0, 1.0) = 0.0;
-// from the weather (PuddleSurface3D): how full it is (a dry puddle shrinks to its deepest part and
-// goes), ice over it, snow on it
-uniform float water_level : hint_range(0.0, 1.0) = 1.0;
-uniform float frozen : hint_range(0.0, 1.0) = 0.0;
-uniform float snow_cover : hint_range(0.0, 1.0) = 0.0;
 uniform vec3 ice_tint : source_color = vec3(0.78, 0.84, 0.9);
 uniform vec3 snow_albedo : source_color = vec3(0.86, 0.88, 0.92);
 uniform float rain_ripple_threshold : hint_range(0.0, 1.0) = 0.12;
@@ -44,6 +50,9 @@ const vec3 HASHSCALE3 = vec3(0.1031, 0.1030, 0.0973);
 
 // each puddle its own shape
 varying vec2 shore_seed;
+// not INV_VIEW_MATRIX * VERTEX in fragment(): a double precision build keeps the view's origin there
+// its own way
+varying vec3 world_position;
 
 float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * HASHSCALE1);
@@ -78,6 +87,17 @@ float sample_mask_alpha(vec2 uv) {
 
 void vertex() {
     shore_seed = MODEL_MATRIX[3].xz * 0.37;
+    world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+
+// How much of the precipitation reaches world_position, of the open sky's: the probes', 1 out of them
+float precipitation_reach(vec3 position) {
+    float inside = gnd_weather_probe_blend(position);
+    if (inside <= 0.0) {
+        return 1.0;
+    }
+    return mix(1.0, texture(gnd_weather_probes, position / gnd_weather_probe_size).r, inside);
 }
 
 
@@ -96,7 +116,7 @@ vec2 hash22(vec2 p) {
 }
 
 
-float ripple_height(vec2 uv, float time_value) {
+float ripple_height(vec2 uv, float time_value, float rain_strength) {
     float rain_mask = smoothstep(rain_ripple_threshold, 1.0, rain_strength);
     if (rain_mask <= 0.0001) {
         return 0.0;
@@ -142,19 +162,27 @@ float secondary_wave_height(vec2 uv, float time_value) {
 }
 
 
-float water_height(vec2 uv, float time_value) {
+float water_height(vec2 uv, float time_value, float rain_strength, float frozen) {
     float mask = sample_mask_alpha(uv);
     if (mask <= 0.001) {
         return 0.0;
     }
     // ice does not ripple
     float waves = (primary_wave_height(uv, time_value) + secondary_wave_height(uv, time_value)) * (1.0 - frozen);
-    float ripples = ripple_height(uv, time_value);
+    float ripples = ripple_height(uv, time_value, rain_strength);
     return (waves + ripples) * mask;
 }
 
 
 void fragment() {
+    // the ground where it lies: its standing water, its temperature (ice below freezing), its snow
+    vec4 local = gnd_weather_local(world_position);
+    float water_level = clamp(gnd_puddles, 0.0, 1.0) * local.b;
+    float frozen = 1.0 - clamp(local.a + 0.5, 0.0, 1.0);
+    float snow_cover = clamp(gnd_snow_cover * local.r * gnd_weather_snow_kept(local.a, 0.0), 0.0, 1.0);
+    // only the rain ripples it, as much of it as reaches it, and not the ice
+    float rain_strength = clamp(gnd_rain * precipitation_reach(world_position), 0.0, 1.0) * (1.0 - frozen);
+
     float mask = sample_mask_alpha(UV);
     // drying, only the deeper part of the mask still holds water
     float cutoff = mix(1.02, puddle_alpha_cutoff, smoothstep(0.05, 0.6, water_level));
@@ -171,10 +199,10 @@ void fragment() {
 
     float t = TIME;
     float eps = 0.004;
-    float h_l = water_height(UV + vec2(-eps, 0.0), t);
-    float h_r = water_height(UV + vec2(eps, 0.0), t);
-    float h_d = water_height(UV + vec2(0.0, -eps), t);
-    float h_u = water_height(UV + vec2(0.0, eps), t);
+    float h_l = water_height(UV + vec2(-eps, 0.0), t, rain_strength, frozen);
+    float h_r = water_height(UV + vec2(eps, 0.0), t, rain_strength, frozen);
+    float h_d = water_height(UV + vec2(0.0, -eps), t, rain_strength, frozen);
+    float h_u = water_height(UV + vec2(0.0, eps), t, rain_strength, frozen);
 
     vec3 base_normal = normalize(NORMAL);
     float slope_strength = max(normal_strength, 0.0) * 3.2;

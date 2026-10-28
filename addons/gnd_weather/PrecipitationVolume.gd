@@ -115,6 +115,11 @@ func get_half_size() -> Vector3:
     return _cached_half_size
 
 
+## The world's box about it with its feathered edge, for whoever lays it about a region (the probes)
+func get_world_bounds() -> AABB:
+    return global_transform * AABB(-_cached_outer_half_size, _cached_outer_half_size * 2.0)
+
+
 ## Distance from world_position to the volume's outer (feathered) box; 0 inside it.
 func get_distance_to(world_position: Vector3) -> float:
     var local_position := global_transform.affine_inverse() * world_position

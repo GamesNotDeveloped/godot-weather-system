@@ -11,6 +11,9 @@ extends Node
 ## A precipitation volume of world_3d moved, or one came or went: the shaders' shelters (their
 ## boxes) are taken again then, not every frame
 signal precipitation_volumes_moved(world_3d: World3D)
+## world_3d's heat sources changed (WeatherHeatSource3D, a WeatherHeatProvider): its probes are
+## worked out again then
+signal heat_sources_changed(world_3d: World3D)
 
 const WIND_DIRECTION_GLOBAL := &"gnd_wind_direction"
 const WIND_SPEED_GLOBAL := &"gnd_wind_speed"
@@ -33,6 +36,18 @@ const WETNESS_GLOBAL := &"gnd_wetness"
 const AIR_TEMPERATURE_GLOBAL := &"gnd_air_temperature"
 ## The rain falling on the ground (0 - 1, its share of the precipitation)
 const RAIN_GLOBAL := &"gnd_rain"
+## How full the puddles are (0 - 1, past 1 flooding): a ground model of standing water sets it, full
+## without one
+const PUDDLES_GLOBAL := &"gnd_puddles"
+## The weather probes' (WeatherNode, WeatherProbes): the ground at them, their window's corner and
+## size in the world, whether there are any
+const WEATHER_GROUND_GLOBAL := &"gnd_weather_ground"
+## The probes themselves: how much of the precipitation reaches each (r), its temperature, humidity,
+## the lightning's multiplier (WeatherProbes.probes_texture)
+const WEATHER_PROBES_GLOBAL := &"gnd_weather_probes"
+const WEATHER_PROBE_ORIGIN_GLOBAL := &"gnd_weather_probe_origin"
+const WEATHER_PROBE_SIZE_GLOBAL := &"gnd_weather_probe_size"
+const WEATHER_PROBES_ENABLED_GLOBAL := &"gnd_weather_probes_enabled"
 ## The ground's globals are named with this prefix instead of gnd_, for a project whose materials
 ## read the ground's state under names of its own (e.g. "game_": game_snow_depth, ...); the
 ## wind's keep theirs
@@ -49,6 +64,20 @@ const GROUND_GLOBAL_DEFAULTS := {
     &"gnd_wetness": 0.0,
     &"gnd_air_temperature": 10.0,
     &"gnd_rain": 0.0,
+    &"gnd_puddles": 1.0,
+    # the weather probes' (WeatherNode): the ground at them - the open ground's share of its snow, wet
+    # and standing water, its temperature (WeatherProbes.ground_texture) - the window's corner and size
+    # in the world, and whether there are any (0 - none: the open ground's weather everywhere)
+    &"gnd_weather_ground": null,
+    &"gnd_weather_probes": null,
+    &"gnd_weather_probe_origin": Vector3.ZERO,
+    &"gnd_weather_probe_size": Vector3.ONE,
+    &"gnd_weather_probes_enabled": 0.0,
+}
+## The globals whose type their value does not tell (a texture none yet)
+const GROUND_GLOBAL_TYPES := {
+    &"gnd_weather_ground": ["sampler3D", RenderingServer.GLOBAL_VAR_TYPE_SAMPLER3D],
+    &"gnd_weather_probes": ["sampler3D", RenderingServer.GLOBAL_VAR_TYPE_SAMPLER3D],
 }
 ## The snow's depth at which it covers the ground, in metres: below it the ground shows through
 ## in patches (weather_surface.gdshaderinc has the same)
@@ -66,27 +95,15 @@ const REFERENCE_SNOW_DENSITY := 0.1
 const SETTLED_SNOW_DENSITY := 0.25
 const WET_SNOW_DENSITY := 0.45
 const SECONDS_PER_HOUR := 3600.0
-const VISIBLE_PRECIPITATION_PROBE_REFERENCE_DISTANCE := 8.0
-const PRECIPITATION_FIELD_FEATHER_RENDER_CUTOFF := 0.24
-const PRECIPITATION_PROBE_SUPPRESSIVE_FEATHER_BLEND_START := 0.28
-const PRECIPITATION_PROBE_SUPPRESSIVE_FEATHER_BLEND_END := 0.94
-const PRECIPITATION_FIELD_LOWER_CULL_SAMPLE_FACTORS := [0.18, 0.42]
-const PRECIPITATION_FIELD_RESAMPLE_INTERVAL_MSEC := 250
-const PRECIPITATION_FIELD_FOOTPRINT_OFFSETS := [
-    Vector3.ZERO,
-    Vector3(1.0, 0.0, 1.0),
-    Vector3(1.0, 0.0, -1.0),
-    Vector3(-1.0, 0.0, 1.0),
-    Vector3(-1.0, 0.0, -1.0),
-]
 const WIND_GUST_PRIMARY_RATE := 0.055
 const WIND_GUST_SECONDARY_RATE := 0.11
 const WIND_GUST_MACRO_RATE := 0.21
 
 var _precipitation_volumes_by_world: Dictionary = {}
 var _precipitation_volume_revision_by_world: Dictionary = {}
-var _visible_precipitation_probe_fields_by_world: Dictionary = {}
-var _visible_precipitation_probe_configs_by_world: Dictionary = {}
+# the heat sources of each world: its providers (WeatherHeatProvider) and its WeatherHeatSource3D nodes
+var _heat_providers_by_world: Dictionary = {}
+var _heat_source_nodes_by_world: Dictionary = {}
 var _weather_state_by_world: Dictionary = {}
 var _ground_models_by_world: Dictionary = {}
 var _active_precipitation_volumes_by_world: Dictionary = {}
@@ -251,6 +268,96 @@ func remove_precipitation_volume(world_3d: World3D, volume_rid: RID) -> void:
     _notify_precipitation_volumes_changed(world_3d)
 
 
+## Who tells where world_3d's warm (or cold) things are, for the weather probes - a game's vehicles,
+## its buildings (WeatherHeatProvider)
+func add_heat_provider(world_3d: World3D, provider: WeatherHeatProvider) -> void:
+    if world_3d == null or provider == null:
+        return
+    var providers: Array = _heat_providers_by_world.get(world_3d.get_instance_id(), [])
+    if not providers.has(provider):
+        providers.append(provider)
+        provider.heat_sources_changed.connect(mark_heat_sources_changed.bind(world_3d))
+    _heat_providers_by_world[world_3d.get_instance_id()] = providers
+    mark_heat_sources_changed(world_3d)
+
+
+func remove_heat_provider(world_3d: World3D, provider: WeatherHeatProvider) -> void:
+    if world_3d == null or provider == null:
+        return
+    var providers: Array = _heat_providers_by_world.get(world_3d.get_instance_id(), [])
+    if providers.has(provider):
+        providers.erase(provider)
+        provider.heat_sources_changed.disconnect(mark_heat_sources_changed)
+    mark_heat_sources_changed(world_3d)
+
+
+## A heat source of the scene's own (WeatherHeatSource3D), as it enters the world and leaves it
+func add_heat_source_node(world_3d: World3D, node: WeatherHeatSource3D) -> void:
+    if world_3d == null or node == null:
+        return
+    var nodes: Array = _heat_source_nodes_by_world.get(world_3d.get_instance_id(), [])
+    if not nodes.has(node):
+        nodes.append(node)
+    _heat_source_nodes_by_world[world_3d.get_instance_id()] = nodes
+    mark_heat_sources_changed(world_3d)
+
+
+func remove_heat_source_node(world_3d: World3D, node: WeatherHeatSource3D) -> void:
+    if world_3d == null:
+        return
+    var nodes: Array = _heat_source_nodes_by_world.get(world_3d.get_instance_id(), [])
+    nodes.erase(node)
+    mark_heat_sources_changed(world_3d)
+
+
+## world_3d's heat sources changed: its probes worked out again now, not on their next tick
+func mark_heat_sources_changed(world_3d: World3D) -> void:
+    if world_3d != null:
+        heat_sources_changed.emit(world_3d)
+
+
+## world_3d's heat sources near region (world space), as WeatherHeatProvider packs them: its nodes' and
+## every provider's
+func get_heat_sources(world_3d: World3D, region: AABB) -> PackedFloat32Array:
+    var sources := PackedFloat32Array()
+    if world_3d == null:
+        return sources
+    var world_id := world_3d.get_instance_id()
+    for node: WeatherHeatSource3D in _heat_source_nodes_by_world.get(world_id, []):
+        if is_instance_valid(node) and node.is_visible_in_tree() \
+                and region.grow(node.get_reach()).has_point(node.global_position):
+            node.pack_into(sources)
+    for provider: WeatherHeatProvider in _heat_providers_by_world.get(world_id, []):
+        sources.append_array(provider.get_heat_sources(world_3d, region))
+    return sources
+
+
+## world_3d's precipitation volumes about region (world space), in the order they apply (by their
+## priority), for the weather probes (WeatherProbes.VOLUME_STRIDE floats each): the world-to-volume
+## transform's rows, the half size, the edge feather, the delta, the multipliers and whether it is
+## enclosed - every one of them there, not only the observer's nearest
+func get_precipitation_volumes_packed(world_3d: World3D, region: AABB) -> PackedFloat32Array:
+    var packed := PackedFloat32Array()
+    if world_3d == null:
+        return packed
+    var volumes: Array = []
+    for volume in _precipitation_volumes_by_world.get(world_3d.get_instance_id(), {}).values():
+        var precipitation_volume := volume as PrecipitationVolume
+        if is_instance_valid(precipitation_volume) and precipitation_volume.is_inside_tree() \
+                and precipitation_volume.is_precipitation_volume_enabled() \
+                and region.intersects(precipitation_volume.get_world_bounds()):
+            volumes.append(precipitation_volume)
+    for volume: PrecipitationVolume in _sort_precipitation_volumes(volumes):
+        var inverse := volume.global_transform.affine_inverse()
+        for row in 3:
+            packed.append_array([inverse.basis[0][row], inverse.basis[1][row], inverse.basis[2][row], inverse.origin[row]])
+        var half_size := volume.get_half_size()
+        packed.append_array([half_size.x, half_size.y, half_size.z, volume.edge_feather,
+            volume.get_precipitation_delta(), volume.get_precipitation_multiplier(), volume.get_lightning_multiplier(),
+            1.0 if volume.enclosed else 0.0, 0.0, 0.0, 0.0, 0.0])
+    return packed
+
+
 ## Rain volumes farther than this from the weather observer are ignored by all rain queries.
 func set_precipitation_volume_active_distance(world_3d: World3D, distance: float) -> void:
     var state := _ensure_weather_state(world_3d)
@@ -294,43 +401,6 @@ func get_precipitation_volume_revision(world_3d: World3D) -> int:
         return 0
 
     return int(_precipitation_volume_revision_by_world.get(world_3d.get_instance_id(), 0))
-
-
-func configure_visible_precipitation_probe_field(
-    world_3d: World3D,
-    cache_key: int,
-    max_probes: int,
-    distance: float
-) -> void:
-    if world_3d == null or cache_key < 0:
-        return
-
-    var world_id := world_3d.get_instance_id()
-    var world_bucket: Dictionary = _visible_precipitation_probe_configs_by_world.get(world_id, {})
-    world_bucket[cache_key] = {
-        "max_probes": maxi(max_probes, 1),
-        "distance": maxf(distance, 0.1),
-    }
-    _visible_precipitation_probe_configs_by_world[world_id] = world_bucket
-    clear_visible_precipitation_participation_cache(world_3d, cache_key)
-
-
-func clear_visible_precipitation_probe_field_config(world_3d: World3D, cache_key: int) -> void:
-    if world_3d == null or cache_key < 0:
-        return
-
-    var world_id := world_3d.get_instance_id()
-    var world_bucket: Dictionary = _visible_precipitation_probe_configs_by_world.get(world_id, {})
-    if world_bucket.is_empty():
-        return
-
-    world_bucket.erase(cache_key)
-    if world_bucket.is_empty():
-        _visible_precipitation_probe_configs_by_world.erase(world_id)
-    else:
-        _visible_precipitation_probe_configs_by_world[world_id] = world_bucket
-
-    clear_visible_precipitation_participation_cache(world_3d, cache_key)
 
 
 func clear_weather_state(world_3d: World3D) -> void:
@@ -458,7 +528,7 @@ func set_ground_global(name: StringName, value: Variant) -> void:
         global_name = get_ground_global_name(name)
         _ground_global_names[name] = global_name
         if not ProjectSettings.has_setting("shader_globals/" + String(global_name)):
-            RenderingServer.global_shader_parameter_add(global_name, _get_global_types(value)[1], value)
+            RenderingServer.global_shader_parameter_add(global_name, _get_global_types(value, name)[1], value)
     RenderingServer.global_shader_parameter_set(global_name, value)
 
 
@@ -481,8 +551,12 @@ func get_ground_global_names() -> Dictionary:
 
 
 ## The project setting's type and the RenderingServer's for a global's default value
-func _get_global_types(value: Variant) -> Array:
+func _get_global_types(value: Variant, global_name: StringName = &"") -> Array:
+    if GROUND_GLOBAL_TYPES.has(global_name):
+        return GROUND_GLOBAL_TYPES[global_name]
     match typeof(value):
+        TYPE_VECTOR3:
+            return ["vec3", RenderingServer.GLOBAL_VAR_TYPE_VEC3]
         TYPE_VECTOR2:
             return ["vec2", RenderingServer.GLOBAL_VAR_TYPE_VEC2]
         TYPE_PROJECTION:
@@ -508,7 +582,7 @@ func _ensure_ground_globals() -> void:
         var global_name: StringName = _ground_global_names[default_name]
         if not ProjectSettings.has_setting("shader_globals/" + String(global_name)):
             var value: Variant = GROUND_GLOBAL_DEFAULTS[default_name]
-            RenderingServer.global_shader_parameter_add(global_name, _get_global_types(value)[1], value)
+            RenderingServer.global_shader_parameter_add(global_name, _get_global_types(value, default_name)[1], value)
     _ground_globals_ready = true
 
 
@@ -617,7 +691,7 @@ func ensure_wind_project_settings() -> void:
         var setting := "shader_globals/" + String(ground_global_names[default_name])
         if not ProjectSettings.has_setting(setting):
             var value: Variant = GROUND_GLOBAL_DEFAULTS[default_name]
-            ProjectSettings.set_setting(setting, {"type": _get_global_types(value)[0], "value": "" if value == null else value})
+            ProjectSettings.set_setting(setting, {"type": _get_global_types(value, default_name)[0], "value": "" if value == null else value})
             dirty = true
 
     if not ProjectSettings.has_setting(String(WIND_PATTERN_SETTING)):
@@ -728,70 +802,6 @@ func _hash_wind_noise(index: int) -> float:
     return (value - floor(value)) * 2.0 - 1.0
 
 
-func get_configured_visible_precipitation_probe_field_layout(
-    world_3d: World3D,
-    cache_key: int,
-    camera: Camera3D
-) -> Dictionary:
-    if world_3d == null or cache_key < 0:
-        return {}
-
-    var world_id := world_3d.get_instance_id()
-    var world_bucket: Dictionary = _visible_precipitation_probe_configs_by_world.get(world_id, {})
-    var config: Dictionary = world_bucket.get(cache_key, {})
-    if config.is_empty():
-        return {}
-
-    return _build_visible_precipitation_probe_field_layout(
-        camera,
-        int(config.get("max_probes", 24)),
-        float(config.get("distance", 8.0))
-    )
-
-
-func get_configured_visible_precipitation_probe_spacing(
-    world_3d: World3D,
-    cache_key: int,
-    camera: Camera3D
-) -> float:
-    var layout: Dictionary = get_configured_visible_precipitation_probe_field_layout(world_3d, cache_key, camera)
-    return _get_visible_precipitation_probe_layout_spacing(layout)
-
-
-func get_registered_visible_precipitation_probe_positions(
-    world_3d: World3D,
-    view_transform: Transform3D,
-    camera: Camera3D
-) -> PackedVector3Array:
-    if world_3d == null:
-        return PackedVector3Array()
-
-    var world_id := world_3d.get_instance_id()
-    var world_bucket: Dictionary = _visible_precipitation_probe_configs_by_world.get(world_id, {})
-    if world_bucket.is_empty():
-        return PackedVector3Array()
-
-    var positions := PackedVector3Array()
-    for cache_key in world_bucket.keys():
-        var layout: Dictionary = get_configured_visible_precipitation_probe_field_layout(world_3d, int(cache_key), camera)
-        if layout.is_empty():
-            continue
-
-        var field_positions := get_visible_precipitation_probe_positions(
-            view_transform,
-            camera,
-            int(layout.get("probe_columns", 1)),
-            int(layout.get("probe_rows", 1)),
-            int(layout.get("probe_depth_slices", 1)),
-            float(layout.get("near_depth", 0.5)),
-            float(layout.get("far_depth", 1.0)),
-            float(layout.get("field_scale", 1.0))
-        )
-        positions.append_array(field_positions)
-
-    return positions
-
-
 func get_precipitation_participation_strength(
     world_3d: World3D,
     world_position: Vector3,
@@ -860,237 +870,6 @@ func _get_precipitation_participation_strength_for_sorted_volumes(
     return intensity
 
 
-func _get_precipitation_probe_render_strength_for_sorted_volumes(
-    sorted_volumes: Array,
-    world_position: Vector3,
-    base_strength: float
-) -> float:
-    var intensity: float = clampf(base_strength, 0.0, 1.0)
-    for volume in sorted_volumes:
-        var blend: float = volume.get_precipitation_blend(world_position)
-        if blend <= 0.0:
-            continue
-
-        var precipitation_multiplier: float = volume.get_precipitation_multiplier()
-        var full_intensity: float = clampf(
-            (intensity + volume.get_precipitation_delta()) * precipitation_multiplier,
-            0.0,
-            1.0
-        )
-        var effective_blend: float = blend
-        if full_intensity < intensity - 0.0001 and blend < 1.0:
-            effective_blend = _remap_probe_render_suppressive_blend(blend)
-
-        var precipitation_delta: float = volume.get_precipitation_delta() * effective_blend
-        var blended_multiplier: float = lerpf(1.0, precipitation_multiplier, effective_blend)
-        intensity = clampf((intensity + precipitation_delta) * blended_multiplier, 0.0, 1.0)
-    return intensity
-
-
-func get_visible_precipitation_participation_strength(
-    world_3d: World3D,
-    cache_key: int,
-    view_transform: Transform3D,
-    camera: Camera3D,
-    base_strength: float,
-    probe_columns: int,
-    probe_rows: int,
-    probe_depth_slices: int,
-    near_depth: float,
-    far_depth: float,
-    field_scale: float,
-    refresh_budget: int
-) -> float:
-    var state: Dictionary = get_visible_precipitation_probe_field_state(
-        world_3d,
-        cache_key,
-        view_transform,
-        camera,
-        base_strength,
-        probe_columns,
-        probe_rows,
-        probe_depth_slices,
-        near_depth,
-        far_depth,
-        field_scale,
-        refresh_budget
-    )
-    return float(state.get("strength", 0.0))
-
-
-func get_configured_visible_precipitation_participation_strength(
-    world_3d: World3D,
-    cache_key: int,
-    view_transform: Transform3D,
-    camera: Camera3D,
-    base_strength: float
-) -> float:
-    var state := get_configured_visible_precipitation_probe_field_state(
-        world_3d,
-        cache_key,
-        view_transform,
-        camera,
-        base_strength
-    )
-    return float(state.get("strength", 0.0))
-
-
-func get_visible_precipitation_probe_field_state(
-    world_3d: World3D,
-    cache_key: int,
-    view_transform: Transform3D,
-    camera: Camera3D,
-    base_strength: float,
-    probe_columns: int,
-    probe_rows: int,
-    probe_depth_slices: int,
-    near_depth: float,
-    far_depth: float,
-    field_scale: float,
-    refresh_budget: int
-) -> Dictionary:
-    if world_3d == null or cache_key < 0:
-        return {
-            "strength": 0.0,
-            "nearest_depth": 0.0,
-            "has_visible_precipitation": false,
-        }
-
-    var clamped_strength: float = clampf(base_strength, 0.0, 1.0)
-    var active_volumes: Array = _get_active_precipitation_volumes(world_3d)
-    if clamped_strength <= 0.001 and active_volumes.is_empty():
-        clear_visible_precipitation_participation_cache(world_3d, cache_key)
-        return {
-            "strength": 0.0,
-            "nearest_depth": 0.0,
-            "has_visible_precipitation": false,
-        }
-
-    var columns: int = maxi(probe_columns, 1)
-    var rows: int = maxi(probe_rows, 1)
-    var depth_slices: int = maxi(probe_depth_slices, 1)
-    var probe_count: int = columns * rows * depth_slices
-    var budget: int = clampi(refresh_budget, 1, probe_count)
-    var cache: Dictionary = _ensure_visible_precipitation_probe_field_cache(world_3d, cache_key, probe_count)
-    var values: PackedFloat32Array = cache.get("values", PackedFloat32Array())
-    var cursor: int = int(cache.get("cursor", 0))
-    var ready: bool = bool(cache.get("ready", false))
-
-    if not ready:
-        budget = probe_count
-
-    for offset in range(budget):
-        var probe_index: int = (cursor + offset) % probe_count
-        var probe_position: Vector3 = _get_visible_precipitation_probe_world_position(
-            view_transform,
-            camera,
-            columns,
-            rows,
-            depth_slices,
-            near_depth,
-            far_depth,
-            field_scale,
-            probe_index
-        )
-        values[probe_index] = _get_precipitation_probe_render_strength_for_sorted_volumes(
-            active_volumes,
-            probe_position,
-            clamped_strength
-        )
-
-    cache["values"] = values
-    cache["cursor"] = (cursor + budget) % probe_count
-    cache["ready"] = true
-    _store_visible_precipitation_probe_field_cache(world_3d, cache_key, cache)
-    return _get_visible_precipitation_probe_field_state(
-        values,
-        columns * rows,
-        depth_slices,
-        near_depth,
-        far_depth
-    )
-
-
-func get_configured_visible_precipitation_probe_field_state(
-    world_3d: World3D,
-    cache_key: int,
-    view_transform: Transform3D,
-    camera: Camera3D,
-    base_strength: float
-) -> Dictionary:
-    var layout: Dictionary = get_configured_visible_precipitation_probe_field_layout(world_3d, cache_key, camera)
-    if layout.is_empty():
-        return {
-            "strength": 0.0,
-            "nearest_depth": 0.0,
-            "has_visible_precipitation": false,
-        }
-
-    return get_visible_precipitation_probe_field_state(
-        world_3d,
-        cache_key,
-        view_transform,
-        camera,
-        base_strength,
-        int(layout.get("probe_columns", 1)),
-        int(layout.get("probe_rows", 1)),
-        int(layout.get("probe_depth_slices", 1)),
-        float(layout.get("near_depth", 0.5)),
-        float(layout.get("far_depth", 1.0)),
-        float(layout.get("field_scale", 1.0)),
-        int(layout.get("refresh_budget", 1))
-    )
-
-
-func get_visible_precipitation_probe_positions(
-    view_transform: Transform3D,
-    camera: Camera3D,
-    probe_columns: int,
-    probe_rows: int,
-    probe_depth_slices: int,
-    near_depth: float,
-    far_depth: float,
-    field_scale: float
-) -> PackedVector3Array:
-    var columns: int = maxi(probe_columns, 1)
-    var rows: int = maxi(probe_rows, 1)
-    var depth_slices: int = maxi(probe_depth_slices, 1)
-    var probe_count: int = columns * rows * depth_slices
-    var positions := PackedVector3Array()
-    positions.resize(probe_count)
-
-    for probe_index in range(probe_count):
-        positions[probe_index] = _get_visible_precipitation_probe_world_position(
-            view_transform,
-            camera,
-            columns,
-            rows,
-            depth_slices,
-            near_depth,
-            far_depth,
-            field_scale,
-            probe_index
-        )
-
-    return positions
-
-
-func clear_visible_precipitation_participation_cache(world_3d: World3D, cache_key: int) -> void:
-    if world_3d == null or cache_key < 0:
-        return
-
-    var world_id: int = world_3d.get_instance_id()
-    var world_fields: Dictionary = _visible_precipitation_probe_fields_by_world.get(world_id, {})
-    if world_fields.is_empty():
-        return
-
-    world_fields.erase(cache_key)
-    if world_fields.is_empty():
-        _visible_precipitation_probe_fields_by_world.erase(world_id)
-    else:
-        _visible_precipitation_probe_fields_by_world[world_id] = world_fields
-
-
 func _get_active_precipitation_volumes(world_3d: World3D) -> Array:
     if world_3d == null:
         return []
@@ -1146,7 +925,6 @@ func _notify_precipitation_volumes_changed(world_3d: World3D) -> void:
     var world_id := world_3d.get_instance_id()
     _precipitation_volume_revision_by_world[world_id] = int(_precipitation_volume_revision_by_world.get(world_id, 0)) + 1
     _active_precipitation_volumes_by_world.erase(world_id)
-    _visible_precipitation_probe_fields_by_world.erase(world_id)
     precipitation_volumes_moved.emit(world_3d)
 
 
@@ -1170,28 +948,6 @@ func _sort_precipitation_volumes(volumes: Array) -> Array:
     return sorted_volumes
 
 
-func _ensure_visible_precipitation_probe_field_cache(world_3d: World3D, cache_key: int, probe_count: int) -> Dictionary:
-    var world_id: int = world_3d.get_instance_id()
-    var world_fields: Dictionary = _visible_precipitation_probe_fields_by_world.get(world_id, {})
-    var cache: Dictionary = world_fields.get(cache_key, {})
-    var current_count: int = int(cache.get("count", -1))
-    var values: PackedFloat32Array = cache.get("values", PackedFloat32Array())
-
-    if current_count != probe_count or values.size() != probe_count:
-        values = PackedFloat32Array()
-        values.resize(probe_count)
-        cache = {
-            "count": probe_count,
-            "cursor": 0,
-            "ready": false,
-            "values": values,
-        }
-        world_fields[cache_key] = cache
-        _visible_precipitation_probe_fields_by_world[world_id] = world_fields
-
-    return cache
-
-
 func _apply_weather_controlled_wind(world_3d: World3D) -> void:
     _ensure_ground_globals()
     RenderingServer.global_shader_parameter_set(StringName(WIND_DIRECTION_GLOBAL), get_final_wind_direction(world_3d))
@@ -1203,166 +959,4 @@ func _apply_weather_controlled_wind(world_3d: World3D) -> void:
         StringName(WIND_TIME_GLOBAL),
         get_weather_controlled_wind_time(world_3d)
     )
-
-
-func _store_visible_precipitation_probe_field_cache(world_3d: World3D, cache_key: int, cache: Dictionary) -> void:
-    var world_id: int = world_3d.get_instance_id()
-    var world_fields: Dictionary = _visible_precipitation_probe_fields_by_world.get(world_id, {})
-    world_fields[cache_key] = cache
-    _visible_precipitation_probe_fields_by_world[world_id] = world_fields
-
-
-func _build_visible_precipitation_probe_field_layout(
-    camera: Camera3D,
-    max_probes: int,
-    distance: float
-) -> Dictionary:
-    var safe_max_probes: int = maxi(max_probes, 1)
-    var safe_far_depth: float = maxf(distance, 0.1)
-    var near_depth: float = minf(0.1, safe_far_depth)
-    var axis_count: int = maxi(int(ceil(pow(float(safe_max_probes), 1.0 / 3.0))), 1)
-    var probe_columns: int = axis_count
-    var probe_rows: int = axis_count
-    var probe_depth_slices: int = axis_count
-    var probe_count: int = probe_columns * probe_rows * probe_depth_slices
-
-    while probe_count > safe_max_probes:
-        if probe_columns >= probe_rows and probe_columns >= probe_depth_slices and probe_columns > 1:
-            probe_columns -= 1
-        elif probe_rows >= probe_depth_slices and probe_rows > 1:
-            probe_rows -= 1
-        elif probe_depth_slices > 1:
-            probe_depth_slices -= 1
-        else:
-            break
-        probe_count = probe_columns * probe_rows * probe_depth_slices
-
-    return {
-        "max_probes": safe_max_probes,
-        "distance": safe_far_depth,
-        "probe_columns": probe_columns,
-        "probe_rows": probe_rows,
-        "probe_depth_slices": probe_depth_slices,
-        "near_depth": near_depth,
-        "far_depth": safe_far_depth,
-        "field_scale": 1.0,
-        "refresh_budget": probe_columns * probe_rows * probe_depth_slices,
-    }
-
-
-func _get_visible_precipitation_probe_layout_spacing(layout: Dictionary) -> float:
-    if layout.is_empty():
-        return -1.0
-
-    var distance: float = maxf(float(layout.get("distance", 0.1)), 0.1)
-    var near_depth: float = clampf(float(layout.get("near_depth", 0.1)), 0.0, distance)
-    var depth_span: float = maxf(distance - near_depth, 0.1)
-    var field_scale: float = maxf(float(layout.get("field_scale", 1.0)), 0.01)
-    var half_extent: float = maxf(distance * field_scale * 0.5, 0.05)
-    var columns: int = maxi(int(layout.get("probe_columns", 1)), 1)
-    var rows: int = maxi(int(layout.get("probe_rows", 1)), 1)
-    var depth_slices: int = maxi(int(layout.get("probe_depth_slices", 1)), 1)
-    var lateral_spacing: float = (half_extent * 2.0) / maxf(float(columns - 1), 1.0)
-    var vertical_spacing: float = (half_extent * 2.0) / maxf(float(rows - 1), 1.0)
-    var depth_spacing: float = depth_span / maxf(float(depth_slices - 1), 1.0)
-    return maxf(minf(lateral_spacing, minf(vertical_spacing, depth_spacing)), 0.1)
-
-
-func _get_visible_precipitation_probe_world_position(
-    view_transform: Transform3D,
-    camera: Camera3D,
-    probe_columns: int,
-    probe_rows: int,
-    probe_depth_slices: int,
-    near_depth: float,
-    far_depth: float,
-    field_scale: float,
-    probe_index: int
-) -> Vector3:
-    var slice_index: int = probe_index / (probe_columns * probe_rows)
-    var plane_index: int = probe_index % (probe_columns * probe_rows)
-    var row_index: int = plane_index / probe_columns
-    var column_index: int = plane_index % probe_columns
-
-    var depth_t: float = 0.0 if probe_depth_slices <= 1 else float(slice_index) / float(probe_depth_slices - 1)
-    var u: float = 0.0 if probe_columns <= 1 else lerpf(-1.0, 1.0, float(column_index) / float(probe_columns - 1))
-    var v: float = 0.0 if probe_rows <= 1 else lerpf(1.0, -1.0, float(row_index) / float(probe_rows - 1))
-
-    var safe_near_depth: float = minf(maxf(near_depth, 0.0), far_depth)
-    var depth_span: float = maxf(far_depth - safe_near_depth, 0.1)
-    var center_depth: float = safe_near_depth + depth_span * 0.5
-    var half_extent: float = maxf(far_depth * field_scale * 0.5, 0.05)
-    var forward: Vector3 = -view_transform.basis.z
-    var right: Vector3 = view_transform.basis.x
-    var up: Vector3 = view_transform.basis.y
-    return (
-        view_transform.origin
-        + forward * center_depth
-        + right * (u * half_extent)
-        + up * (v * half_extent)
-        + forward * ((depth_t - 0.5) * depth_span)
-    )
-
-
-func _remap_probe_render_suppressive_blend(blend: float) -> float:
-    return _smoothstepf(
-        clampf(blend, 0.0, 1.0),
-        PRECIPITATION_PROBE_SUPPRESSIVE_FEATHER_BLEND_START,
-        PRECIPITATION_PROBE_SUPPRESSIVE_FEATHER_BLEND_END
-    )
-
-
-func _get_visible_precipitation_probe_field_state(
-    values: PackedFloat32Array,
-    plane_probe_count: int,
-    probe_depth_slices: int,
-    near_depth: float,
-    far_depth: float
-) -> Dictionary:
-    var visible_intensity: float = 0.0
-    var nearest_visible_depth: float = 0.0
-    var has_visible_precipitation: bool = false
-
-    for probe_index in range(values.size()):
-        var value: float = values[probe_index]
-        if value <= 0.001:
-            continue
-
-        visible_intensity = maxf(visible_intensity, value)
-        var depth: float = _get_visible_precipitation_probe_depth(
-            plane_probe_count,
-            probe_depth_slices,
-            near_depth,
-            far_depth,
-            probe_index
-        )
-        if not has_visible_precipitation or depth < nearest_visible_depth:
-            nearest_visible_depth = depth
-            has_visible_precipitation = true
-
-    return {
-        "strength": visible_intensity,
-        "nearest_depth": nearest_visible_depth,
-        "has_visible_precipitation": has_visible_precipitation,
-    }
-
-
-func _get_visible_precipitation_probe_depth(
-    plane_probe_count: int,
-    probe_depth_slices: int,
-    near_depth: float,
-    far_depth: float,
-    probe_index: int
-) -> float:
-    var safe_plane_probe_count: int = maxi(plane_probe_count, 1)
-    var safe_depth_slices: int = maxi(probe_depth_slices, 1)
-    var slice_index: int = 0 if safe_depth_slices <= 1 else probe_index / safe_plane_probe_count
-    slice_index = clampi(slice_index, 0, safe_depth_slices - 1)
-    var depth_t: float = 0.0 if safe_depth_slices <= 1 else float(slice_index) / float(safe_depth_slices - 1)
-    return lerpf(maxf(near_depth, 0.1), maxf(far_depth, near_depth), depth_t)
-
-
-func _smoothstepf(value: float, start: float, end: float) -> float:
-    var t := clampf((value - start) / maxf(end - start, 0.0001), 0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
 

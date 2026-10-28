@@ -11,6 +11,8 @@ var _temperature_row: Control
 var _snow_row: Control
 var _from_temperature: CheckBox
 var _snow_cover: CheckBox
+# a warm place in the ground before the camera (a boiler room's pit): no snow lies on it
+var _warm_ground: WeatherHeatSource3D
 # [slider, number label, step, getter]: the panel follows the weather, whatever changed it
 var _sliders: Array = []
 
@@ -45,6 +47,14 @@ func _ready() -> void:
     _snow_cover.button_pressed = _weather.snow_cover_enabled
     _snow_cover.toggled.connect(func(pressed: bool) -> void: _weather.snow_cover_enabled = pressed)
     box.add_child(_snow_cover)
+    _warm_ground = WeatherHeatSource3D.new()
+    _warm_ground.name = "WarmGround"
+    _warm_ground.size = Vector3(3.0, 1.0, 3.0)
+    _warm_ground.falloff = 2.0
+    _warm_ground.position = Vector3(-4.0, 0.5, 3.0)
+    _weather.get_parent().add_child.call_deferred(_warm_ground)
+    _add_slider(box, "Warm ground °C", -20.0, 80.0, 0.5, func() -> float: return _warm_ground.temperature,
+        func(v: float) -> void: _warm_ground.temperature = v)
     _add_slider(box, "Snow density", 0.1, 4.0, 0.01, func() -> float: return _weather.snow_density,
         func(v: float) -> void: _weather.snow_density = v)
     _add_slider(box, "Time x", 1.0, 3600.0, 1.0, func() -> float: return _weather.weather_time_scale,

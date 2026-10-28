@@ -93,7 +93,8 @@ void fragment() {
 		discard;
 	}
 
-	float instance_alpha = clamp(instance_custom_data.g, 0.0, 1.0) * edge_fade;
+	// thinned where the probes let less of it through (a volume's feathered edge, a partial one)
+	float instance_alpha = clamp(instance_custom_data.g, 0.0, 1.0) * edge_fade * precipitation_reach(world_position);
 	float variation = instance_custom_data.b;
 	float detail = instance_custom_data.a;
 	float primary_trail = UV.y;

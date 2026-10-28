@@ -132,7 +132,8 @@ void fragment() {
 		float arms = pow(abs(cos(angle * 3.0)), 12.0) * (1.0 - smoothstep(0.05, 0.85, radius));
 		shape = mix(disc, max(clump * 0.85, arms), flake_detail);
 	}
-	float alpha = shape * tint.a * layer_alpha * flake_alpha;
+	// thinned where the probes let less of it through (a volume's feathered edge, a partial one)
+	float alpha = shape * tint.a * layer_alpha * flake_alpha * precipitation_reach(world_position);
 	if (alpha < 0.003) {
 		discard;
 	}
