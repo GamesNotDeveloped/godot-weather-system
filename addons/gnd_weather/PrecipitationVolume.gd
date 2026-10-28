@@ -1,12 +1,12 @@
 @tool
-class_name RainVolume
+class_name PrecipitationVolume
 extends VisualInstance3D
 
 enum VolumeShape {
     BOX,
 }
 
-@export_group("Rain")
+@export_group("Precipitation")
 @export var volume_enabled: bool = true:
     set(value):
         if volume_enabled == value:
@@ -39,6 +39,15 @@ enum VolumeShape {
         if is_equal_approx(lightning_multiplier, next_value):
             return
         lightning_multiplier = next_value
+        _notify_weather_server_changed()
+
+## Walls all round, not a roof only (precipitation_delta -1): nothing inside is wet, however slanting
+## the rain or the snow - a car's interior. A roof lets a slanting rain in under it from the windward side.
+@export var enclosed: bool = false:
+    set(value):
+        if enclosed == value:
+            return
+        enclosed = value
         _notify_weather_server_changed()
 
 @export_group("Volume")
@@ -75,6 +84,10 @@ var _cached_edge_feather: float = 0.6
 func _notification(what: int) -> void:
     if what == NOTIFICATION_READY:
         _refresh_cached_volume_shape()
+        # its box taken by the shaders as it moves - a vehicle's - only then
+        set_notify_transform(true)
+    elif what == NOTIFICATION_TRANSFORM_CHANGED and _registered_world != null:
+        WeatherServer.notify_precipitation_volume_moved(_registered_world)
 
     if what == NOTIFICATION_ENTER_WORLD:
         _register_in_weather_server()
@@ -82,7 +95,7 @@ func _notification(what: int) -> void:
         _unregister_from_weather_server()
 
 
-func is_rain_volume_enabled() -> bool:
+func is_precipitation_volume_enabled() -> bool:
     return volume_enabled
 
 
@@ -100,6 +113,11 @@ func get_lightning_multiplier() -> float:
 
 func get_half_size() -> Vector3:
     return _cached_half_size
+
+
+## The world's box about it with its feathered edge, for whoever lays it about a region (the probes)
+func get_world_bounds() -> AABB:
+    return global_transform * AABB(-_cached_outer_half_size, _cached_outer_half_size * 2.0)
 
 
 ## Distance from world_position to the volume's outer (feathered) box; 0 inside it.
@@ -166,14 +184,14 @@ func _register_in_weather_server() -> void:
 
     _registered_world = world_3d
     _registered_volume_rid = volume_rid
-    WeatherServer.add_rain_volume(world_3d, volume_rid, self)
+    WeatherServer.add_precipitation_volume(world_3d, volume_rid, self)
 
 
 func _unregister_from_weather_server() -> void:
     if _registered_world == null or not _registered_volume_rid.is_valid():
         return
 
-    WeatherServer.remove_rain_volume(_registered_world, _registered_volume_rid)
+    WeatherServer.remove_precipitation_volume(_registered_world, _registered_volume_rid)
     _registered_world = null
     _registered_volume_rid = RID()
 
@@ -197,4 +215,4 @@ func _notify_weather_server_changed() -> void:
     var world_3d := _registered_world
     if world_3d == null:
         return
-    WeatherServer.mark_rain_volumes_changed(world_3d)
+    WeatherServer.mark_precipitation_volumes_changed(world_3d)

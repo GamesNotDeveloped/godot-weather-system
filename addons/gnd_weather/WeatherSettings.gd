@@ -1,7 +1,7 @@
 @tool
 class_name WeatherSettings
 
-## Project settings (PREFIX + property) with the rain look of every WeatherNode that has
+## Project settings (PREFIX + property) with the precipitation look of every WeatherNode that has
 ## apply_project_settings enabled. Registered by the plugin with WeatherNode's own defaults.
 
 const PREFIX := "gnd_weather/"
@@ -9,7 +9,7 @@ const PROPERTIES: Array[StringName] = [
     &"precipitation_wind_strength",
     &"wind_influence",
     &"follow_height",
-    &"rain_mesh_density",
+    &"precipitation_mesh_density",
     &"near_layer_speed_multiplier",
     &"near_rain_blur",
     &"near_rain_glow",
@@ -20,8 +20,16 @@ const PROPERTIES: Array[StringName] = [
     &"rain_roughness",
     &"rain_specular_fade_start",
     &"rain_specular_fade_end",
-    &"rain_probe_max_count",
-    &"rain_probe_distance",
+    &"near_snow_color",
+    &"mid_snow_color",
+    &"snow_flake_size",
+    &"snow_fall_speed",
+    &"snow_sway",
+    &"snow_wind_drift",
+    &"snow_density",
+    &"weather_probe_cell",
+    &"weather_probe_extent",
+    &"weather_probe_seconds",
 ]
 
 

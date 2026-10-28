@@ -1,5 +1,5 @@
 @tool
-class_name RainVolumeGizmoPlugin
+class_name PrecipitationVolumeGizmoPlugin
 extends EditorNode3DGizmoPlugin
 
 const HANDLE_NAMES := [
@@ -22,8 +22,8 @@ const HANDLE_AXES := [
 
 const HANDLE_SIGNS := [-1.0, 1.0, -1.0, 1.0, -1.0, 1.0]
 
-const LINE_MATERIAL_NAME := "rain_volume_lines"
-const HANDLE_MATERIAL_NAME := "rain_volume_handles"
+const LINE_MATERIAL_NAME := "precipitation_volume_lines"
+const HANDLE_MATERIAL_NAME := "precipitation_volume_handles"
 
 var undo_redo: EditorUndoRedoManager
 
@@ -34,21 +34,21 @@ func _init() -> void:
 
 
 func _get_gizmo_name() -> String:
-    return "RainVolume"
+    return "PrecipitationVolume"
 
 
 func _has_gizmo(for_node_3d: Node3D) -> bool:
-    return for_node_3d is RainVolume
+    return for_node_3d is PrecipitationVolume
 
 
 func _redraw(gizmo: EditorNode3DGizmo) -> void:
     gizmo.clear()
 
-    var rain_volume := gizmo.get_node_3d() as RainVolume
-    if rain_volume == null:
+    var precipitation_volume := gizmo.get_node_3d() as PrecipitationVolume
+    if precipitation_volume == null:
         return
 
-    var half_size := rain_volume.size * 0.5
+    var half_size := precipitation_volume.size * 0.5
     var corners := [
         Vector3(-half_size.x, -half_size.y, -half_size.z),
         Vector3(half_size.x, -half_size.y, -half_size.z),
@@ -92,28 +92,28 @@ func _get_handle_name(gizmo: EditorNode3DGizmo, handle_id: int, _secondary: bool
 
 
 func _get_handle_value(gizmo: EditorNode3DGizmo, _handle_id: int, _secondary: bool) -> Variant:
-    var rain_volume := gizmo.get_node_3d() as RainVolume
-    if rain_volume == null:
+    var precipitation_volume := gizmo.get_node_3d() as PrecipitationVolume
+    if precipitation_volume == null:
         return {}
     return {
-        "size": rain_volume.size,
-        "position": rain_volume.position,
+        "size": precipitation_volume.size,
+        "position": precipitation_volume.position,
     }
 
 
 func _set_handle(gizmo: EditorNode3DGizmo, handle_id: int, _secondary: bool, camera: Camera3D, screen_pos: Vector2) -> void:
-    var rain_volume := gizmo.get_node_3d() as RainVolume
-    if rain_volume == null or handle_id < 0 or handle_id >= HANDLE_AXES.size():
+    var precipitation_volume := gizmo.get_node_3d() as PrecipitationVolume
+    if precipitation_volume == null or handle_id < 0 or handle_id >= HANDLE_AXES.size():
         return
 
     var axis_local: Vector3 = HANDLE_AXES[handle_id]
     var sign: float = HANDLE_SIGNS[handle_id]
-    var axis_world: Vector3 = (rain_volume.global_transform.basis * axis_local).normalized()
+    var axis_world: Vector3 = (precipitation_volume.global_transform.basis * axis_local).normalized()
     if axis_world.length_squared() <= 0.0001:
         return
 
-    var center_world := rain_volume.global_transform.origin
-    var axis_extent := maxf(rain_volume.size.length() * 4.0, 8.0)
+    var center_world := precipitation_volume.global_transform.origin
+    var axis_extent := maxf(precipitation_volume.size.length() * 4.0, 8.0)
     var ray_origin := camera.project_ray_origin(screen_pos)
     var ray_direction := camera.project_ray_normal(screen_pos)
     var closest_points := Geometry3D.get_closest_points_between_segments(
@@ -125,41 +125,41 @@ func _set_handle(gizmo: EditorNode3DGizmo, handle_id: int, _secondary: bool, cam
     if closest_points.size() < 2:
         return
 
-    var local_point: Vector3 = rain_volume.global_transform.affine_inverse() * closest_points[0]
+    var local_point: Vector3 = precipitation_volume.global_transform.affine_inverse() * closest_points[0]
     var distance_along_axis: float = axis_local.dot(local_point)
     var target_half_extent: float = maxf(distance_along_axis * sign, 0.05)
-    var new_size: Vector3 = rain_volume.size
+    var new_size: Vector3 = precipitation_volume.size
     var axis_index: int = handle_id / 2
-    var current_half_extent: float = rain_volume.size[axis_index] * 0.5
+    var current_half_extent: float = precipitation_volume.size[axis_index] * 0.5
     var face_delta: float = target_half_extent - current_half_extent
     var min_full_extent := 0.1
-    face_delta = maxf(face_delta, min_full_extent - rain_volume.size[axis_index])
-    new_size[axis_index] = rain_volume.size[axis_index] + face_delta
+    face_delta = maxf(face_delta, min_full_extent - precipitation_volume.size[axis_index])
+    new_size[axis_index] = precipitation_volume.size[axis_index] + face_delta
 
     var local_center_offset: Vector3 = axis_local * (sign * face_delta * 0.5)
-    var new_position: Vector3 = rain_volume.position + rain_volume.transform.basis * local_center_offset
+    var new_position: Vector3 = precipitation_volume.position + precipitation_volume.transform.basis * local_center_offset
 
-    rain_volume.size = new_size
-    rain_volume.position = new_position
+    precipitation_volume.size = new_size
+    precipitation_volume.position = new_position
 
 
 func _commit_handle(gizmo: EditorNode3DGizmo, _handle_id: int, _secondary: bool, restore: Variant, cancel: bool) -> void:
-    var rain_volume := gizmo.get_node_3d() as RainVolume
-    if rain_volume == null or typeof(restore) != TYPE_DICTIONARY:
+    var precipitation_volume := gizmo.get_node_3d() as PrecipitationVolume
+    if precipitation_volume == null or typeof(restore) != TYPE_DICTIONARY:
         return
 
-    var restore_size: Vector3 = restore.get("size", rain_volume.size)
-    var restore_position: Vector3 = restore.get("position", rain_volume.position)
+    var restore_size: Vector3 = restore.get("size", precipitation_volume.size)
+    var restore_position: Vector3 = restore.get("position", precipitation_volume.position)
     if cancel:
-        rain_volume.size = restore_size
-        rain_volume.position = restore_position
+        precipitation_volume.size = restore_size
+        precipitation_volume.position = restore_position
         return
 
     if undo_redo == null:
         return
-    undo_redo.create_action("Resize RainVolume")
-    undo_redo.add_do_property(rain_volume, "size", rain_volume.size)
-    undo_redo.add_do_property(rain_volume, "position", rain_volume.position)
-    undo_redo.add_undo_property(rain_volume, "size", restore_size)
-    undo_redo.add_undo_property(rain_volume, "position", restore_position)
+    undo_redo.create_action("Resize PrecipitationVolume")
+    undo_redo.add_do_property(precipitation_volume, "size", precipitation_volume.size)
+    undo_redo.add_do_property(precipitation_volume, "position", precipitation_volume.position)
+    undo_redo.add_undo_property(precipitation_volume, "size", restore_size)
+    undo_redo.add_undo_property(precipitation_volume, "position", restore_position)
     undo_redo.commit_action()

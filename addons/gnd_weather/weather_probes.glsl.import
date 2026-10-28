@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://c0vlr1uy21bu"
+path="res://.godot/imported/weather_probes.glsl-8fec9c69141560a188f760fc2358ec4b.res"
+
+[deps]
+
+source_file="res://addons/gnd_weather/weather_probes.glsl"
+dest_files=["res://.godot/imported/weather_probes.glsl-8fec9c69141560a188f760fc2358ec4b.res"]
+
+[params]
+
