@@ -26,8 +26,6 @@ const PROBE_OFFSETS: Array[Vector2] = [
 @export_range(0.1, 20.0, 0.05) var rain_smoothing_speed: float = 10.35
 @export_range(0.0, 1.0, 0.01) var rain_ripple_threshold: float = 0.31
 @export_range(0.0, 1.0, 0.01) var specular_wet: float = 0.75
-@export_range(0.0, 0.1, 0.0005) var refraction_strength: float = 0.014
-@export_range(0.0, 1.0, 0.01) var refraction_mix: float = 1.0
 @export_range(0.0, 1.0, 0.01) var surface_roughness: float = 0.04
 @export_range(0.0, 1.0, 0.01) var ripple_roughness_reduction: float = 0.02
 @export_range(0.1, 4.0, 0.01) var ripple_speed: float = 0.67
@@ -41,6 +39,10 @@ const PROBE_OFFSETS: Array[Vector2] = [
 var _probe_timer := 0.0
 var _target_rain_strength := 0.0
 var _current_rain_strength := 0.0
+# the ground's state from the weather: how full the puddle is, frozen, under snow
+var _water_level := 1.0
+var _frozen := 0.0
+var _snow_cover := 0.0
 
 var _material: ShaderMaterial
 var _instance_rid: RID
@@ -117,12 +119,13 @@ func _sync_render_state() -> void:
 
     _material.set_shader_parameter("mask_texture", mask_texture)
     _material.set_shader_parameter("rain_strength", _current_rain_strength)
+    _material.set_shader_parameter("water_level", _water_level)
+    _material.set_shader_parameter("frozen", _frozen)
+    _material.set_shader_parameter("snow_cover", _snow_cover)
     _material.set_shader_parameter("rain_ripple_threshold", rain_ripple_threshold)
     _material.set_shader_parameter("puddle_alpha_cutoff", puddle_alpha_cutoff)
     _material.set_shader_parameter("visibility_range_begin", visibility_range_begin)
     _material.set_shader_parameter("visibility_range_end", maxf(visibility_range_end, visibility_range_begin + 0.001))
-    _material.set_shader_parameter("refraction_strength", refraction_strength)
-    _material.set_shader_parameter("refraction_mix", refraction_mix)
     _material.set_shader_parameter("surface_roughness", clampf(surface_roughness, 0.01, 0.18))
     _material.set_shader_parameter("ripple_roughness_reduction", ripple_roughness_reduction)
     _material.set_shader_parameter("specular_strength", specular_wet)
@@ -145,14 +148,20 @@ func _sample_local_rain() -> void:
 
     var weather_state := WeatherServer.get_weather_state(world_3d)
     var base_strength: float = clampf(float(weather_state.get("global_precipitation", 0.0)), 0.0, 1.0)
+    # it fills with the standing water (a weather without the ground model leaves it full), freezes
+    # below zero and goes under the snow; only the rain's share makes ripples
+    _water_level = clampf(float(weather_state.get("puddles", 1.0)), 0.0, 1.0) if weather_state.has("puddles") else 1.0
+    _frozen = 1.0 - clampf(float(weather_state.get("air_temperature", 10.0)) + 0.5, 0.0, 1.0)
+    _snow_cover = clampf(float(weather_state.get("snow_cover", 0.0)), 0.0, 1.0)
+    var rain_share := 1.0 - clampf(float(weather_state.get("snow_fraction", 0.0)), 0.0, 1.0)
     var total := 0.0
     for probe_offset in PROBE_OFFSETS:
-        total += WeatherServer.get_rain_participation_strength(
+        total += WeatherServer.get_precipitation_participation_strength(
             world_3d,
             _get_probe_world_position(probe_offset),
             base_strength
         )
-    _target_rain_strength = clampf(total / float(PROBE_OFFSETS.size()), 0.0, 1.0)
+    _target_rain_strength = clampf(total / float(PROBE_OFFSETS.size()) * rain_share * (1.0 - _frozen), 0.0, 1.0)
 
 
 func _get_probe_world_position(offset: Vector2) -> Vector3:

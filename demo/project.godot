@@ -1,0 +1,74 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Godot Weather System Demo"
+run/main_scene="res://weather_demo.tscn"
+config/features=PackedStringArray("4.7", "Forward Plus")
+
+[autoload]
+
+WeatherServer="*res://addons/gnd_weather/WeatherServer.gd"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gnd_weather/plugin.cfg")
+
+[shader_globals]
+
+gnd_wind_direction={
+"type": "vec2",
+"value": Vector2(0.8, 0.3)
+}
+gnd_wind_speed={
+"type": "float",
+"value": 1.0
+}
+gnd_wind_strength={
+"type": "float",
+"value": 4.0
+}
+gnd_wind_time={
+"type": "float",
+"value": 0.0
+}
+gnd_wind_turbulence={
+"type": "float",
+"value": 1.0
+}
+gnd_snow_cover={
+"type": "float",
+"value": 0.0
+}
+gnd_snow_depth={
+"type": "float",
+"value": 0.0
+}
+gnd_snow_wetness={
+"type": "float",
+"value": 0.0
+}
+gnd_wetness={
+"type": "float",
+"value": 0.0
+}
+gnd_rain={
+"type": "float",
+"value": 0.0
+}
+gnd_air_temperature={
+"type": "float",
+"value": 10.0
+}
+gnd_wind_pattern={
+"type": "sampler2D",
+"value": "res://grass/wind_pattern.png"
+}

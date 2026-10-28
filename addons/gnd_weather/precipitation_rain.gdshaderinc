@@ -1,15 +1,20 @@
-shader_type spatial;
-render_mode blend_premul_alpha, depth_draw_never, cull_disabled;
+// The rain's drops (precipitation_rain.gdshader and a weather's own): included after a wind -
+// vec3 precipitation_rain_wind(vec3 world_position, vec2 wind, float gust_strength, float gust_scale,
+// float turbulence, float seed, float variation, float time), how far it shoves a drop
+// Each instance a cell of a lattice fixed in the world (PrecipitationMesh), its card wrapped round
+// in a box about the camera - nothing about the camera handed over by the CPU - standing along the
+// way the rain falls and turned to the eye. Skips the vertex transform.
+// INSTANCE_CUSTOM: r - phase, g - how much of the rain reaches the cell, b - variation, a - detail
 
 uniform vec4 tint : source_color = vec4(0.84, 0.9, 1.0, 0.12);
 uniform float width_softness : hint_range(0.01, 0.8) = 0.22;
-uniform float tail_softness : hint_range(0.01, 1.0) = 0.55;
-uniform float center_bias : hint_range(0.0, 1.0) = 0.62;
 uniform float flow_speed : hint_range(0.0, 8.0) = 1.0;
+// how far TIME * flow_speed is ahead of the streaks' flow: taken up as the speed changes, so that no
+// drop moves (TIME * a new speed alone moved every drop by the whole time it had rained)
+uniform float flow_offset = 0.0;
 uniform float travel_distance : hint_range(0.0, 32.0) = 8.0;
 uniform float respawn_spread : hint_range(0.0, 4.0) = 0.35;
 uniform float streak_length_scale : hint_range(0.05, 2.0) = 1.0;
-uniform float intensity_alpha : hint_range(0.0, 1.0) = 1.0;
 uniform float blur_amount : hint_range(0.0, 1.0) = 0.0;
 uniform float glow_amount : hint_range(0.0, 1.0) = 0.0;
 uniform float intensity : hint_range(0.0, 1.0) = 0.47;
@@ -17,16 +22,29 @@ uniform float specular : hint_range(0.0, 1.0) = 0.5;
 uniform float roughness : hint_range(0.0, 1.0) = 0.1;
 uniform float specular_fade_start : hint_range(0.0, 50.0) = 2.0;
 uniform float specular_fade_end : hint_range(0.1, 100.0) = 8.0;
+// the box the cards wrap round in about the camera (its half size, its centre this high above the
+// eye) - upwind of it as the rain slants, so the drops come down past the eye
+uniform vec3 box_extents = vec3(8.0, 6.0, 8.0);
+uniform float card_center_height = 0.0;
 
-// Boxes (world-to-box transforms and half sizes) where rain is discarded; set by WeatherNode.
-const int MAX_EXCLUSIONS = 4;
-uniform int exclusion_count = 0;
-uniform mat4 exclusion_inverse_transforms[MAX_EXCLUSIONS];
-uniform vec3 exclusion_half_sizes[MAX_EXCLUSIONS];
+#include "res://addons/gnd_weather/precipitation_exclusion.gdshaderinc"
+#include "res://addons/gnd_weather/precipitation_camera.gdshaderinc"
+
+// the wind (m/s, x and z), its gusts - how far they shove, in metres, and how long their waves are -
+// and how far its eddies whirl a drop about, in metres: precipitation_rain_wind()'s, from the wind
+// included before this
+uniform vec2 wind = vec2(0.0);
+uniform float gust_strength : hint_range(0.0, 20.0) = 0.0;
+uniform float gust_scale : hint_range(2.0, 200.0) = 25.0;
+uniform float turbulence : hint_range(0.0, 5.0) = 0.0;
+
+// the way the rain falls (WeatherNode), for what a roof shelters
+uniform vec3 fall_direction = vec3(0.0, -1.0, 0.0);
 
 varying vec4 instance_custom_data;
 varying float streak_flow;
 varying vec3 world_position;
+varying float edge_fade;
 
 float hash11(float p) {
 	return fract(sin(p) * 43758.5453123);
@@ -36,33 +54,50 @@ void vertex() {
 	instance_custom_data = INSTANCE_CUSTOM;
 	float variation = instance_custom_data.b;
 	float detail = instance_custom_data.a;
-	float speed = TIME * flow_speed * mix(0.75, 1.35, variation);
+	float speed = (TIME * flow_speed - flow_offset) * mix(0.75, 1.35, variation);
 	streak_flow = fract(instance_custom_data.r + speed);
 	float cycle = floor(instance_custom_data.r + speed);
 	float offset_x = (hash11(instance_custom_data.a * 97.13 + cycle * 13.71) - 0.5) * respawn_spread;
 	float offset_z = (hash11(instance_custom_data.r * 83.17 + cycle * 7.91 + instance_custom_data.a * 19.37) - 0.5) * respawn_spread;
-	VERTEX.y += (streak_flow - 0.5) * travel_distance;
-	VERTEX.x += offset_x + sin((streak_flow + detail) * 6.28318) * mix(0.0, 0.012, detail);
-	VERTEX.z += offset_z;
-	world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	// the card's place from the camera: its cell wrapped round in the box, which stands upwind of the
+	// eye as far as the rain slants over the box's height
+	vec3 camera = precipitation_camera(INV_VIEW_MATRIX);
+	vec3 cell = (MODEL_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).xyz - camera;
+	vec3 down = normalize(fall_direction);
+	vec2 slant = down.xz / clamp(-down.y, 0.25, 1.0);
+	vec3 box_center = vec3(-slant.x * card_center_height, card_center_height, -slant.y * card_center_height);
+	vec2 half_size = max(box_extents.xz, vec2(0.1));
+	vec2 relative = mod(cell.xz - box_center.xz + half_size, half_size * 2.0) - half_size;
+	vec3 center = box_center + vec3(relative.x + offset_x, 0.0, relative.y + offset_z);
+	// faded out towards the box's sides, where the cards wrap round
+	vec2 edge = abs(relative) / half_size;
+	edge_fade = 1.0 - smoothstep(0.75, 1.0, max(edge.x, edge.y));
+	// along the way it falls, turned to the eye: the card's x across, its y down the fall
+	vec3 eye_forward = -normalize(INV_VIEW_MATRIX[2].xyz);
+	vec3 across = cross(eye_forward, down);
+	across = length(across) > 0.0001 ? normalize(across) : normalize(INV_VIEW_MATRIX[0].xyz);
+	float card_scale = mix(0.85, 1.15, variation);
+	float along = (VERTEX.y + (streak_flow - 0.5) * travel_distance) * card_scale;
+	float side = (VERTEX.x + sin((streak_flow + detail) * 6.28318) * mix(0.0, 0.012, detail)) * card_scale;
+	vec3 point = center + across * side + down * along;
+	// the gusts' waves are the world's, so taken where the drop is in it
+	point += precipitation_rain_wind(camera + point, wind, gust_strength, gust_scale, turbulence,
+		instance_custom_data.a + cycle * 0.137, variation, TIME);
+	world_position = camera + point;
+	VERTEX = mat3(VIEW_MATRIX) * point;
+	NORMAL = normalize(mat3(VIEW_MATRIX) * cross(across, down));
 }
 
 void fragment() {
-	for (int i = 0; i < MAX_EXCLUSIONS; i++) {
-		if (i >= exclusion_count) {
-			break;
-		}
-		vec3 local_position = (exclusion_inverse_transforms[i] * vec4(world_position, 1.0)).xyz;
-		if (all(lessThanEqual(abs(local_position), exclusion_half_sizes[i]))) {
-			discard;
-		}
+	if (precipitation_sheltered(world_position, fall_direction)) {
+		discard;
 	}
 
-	float instance_alpha = clamp(instance_custom_data.g, 0.0, 1.0);
+	float instance_alpha = clamp(instance_custom_data.g, 0.0, 1.0) * edge_fade;
 	float variation = instance_custom_data.b;
 	float detail = instance_custom_data.a;
 	float primary_trail = UV.y;
-	float secondary_trail = fract(UV.y * 1.35 + instance_custom_data.r * 0.7 + TIME * flow_speed * 0.18);
+	float secondary_trail = fract(UV.y * 1.35 + instance_custom_data.r * 0.7 + (TIME * flow_speed - flow_offset) * 0.18);
 
 	float center_shift = mix(-0.18, 0.18, detail);
 	float centered_x = abs((UV.x - 0.5) + center_shift * (1.0 - UV.y)) * 2.0;
@@ -108,8 +143,9 @@ void fragment() {
 	float opacity_alpha = clamp(intensity * 0.5, 0.1, 0.4);
 	float blur_visibility = mix(1.0, 0.42, blur_amount);
 	float blur_color_visibility = mix(1.0, 0.58, blur_amount);
-	ALBEDO = tint.rgb * ((core_alpha * intensity + blur_alpha * 0.18) * color_alpha * blur_color_visibility);
-	ALPHA = (core_alpha * intensity + blur_alpha * 0.1) * opacity_alpha * blur_visibility;
+	// thinned out where a PrecipitationVolume's feathered edge or a partial shelter takes the rain away
+	ALBEDO = tint.rgb * ((core_alpha * intensity + blur_alpha * 0.18) * color_alpha * blur_color_visibility) * instance_alpha;
+	ALPHA = (core_alpha * intensity + blur_alpha * 0.1) * opacity_alpha * blur_visibility * instance_alpha;
 	ROUGHNESS = roughness;
 	
 	// Z-buffer / Distance fade:

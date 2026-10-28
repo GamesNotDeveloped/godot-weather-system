@@ -1,46 +1,62 @@
 @tool
 extends EditorPlugin
 
-const RAIN_VOLUME_GIZMO_PLUGIN_SCRIPT := preload("res://addons/gnd_weather/RainVolumeGizmoPlugin.gd")
+const PRECIPITATION_VOLUME_GIZMO_PLUGIN_SCRIPT := preload("res://addons/gnd_weather/PrecipitationVolumeGizmoPlugin.gd")
+## The weather's singleton, the plugin's autoload: a game of more registers its subclass under the
+## same name in its own project
+const SERVER_NAME := "WeatherServer"
+const SERVER_PATH := "res://addons/gnd_weather/WeatherServer.gd"
 const PROBE_BUTTON_TEXT := "Weather Probes"
-const RAIN_MESHES_BUTTON_TEXT := "Rain Meshes"
+const PRECIPITATION_MESHES_BUTTON_TEXT := "Precipitation Meshes"
 const PROBE_REFRESH_INTERVAL := 0.2
-const RAIN_MESH_SYNC_INTERVAL := 1.0
+const PRECIPITATION_MESH_SYNC_INTERVAL := 1.0
 const PROBE_WORLD_SCALE_MIN := 0.03
 const PROBE_WORLD_SCALE_MAX := 0.18
 const PROBE_WORLD_SCALE_FACTOR := 0.015
 const PROBE_COLOR := Color(0.25, 0.78, 1.0, 0.92)
-const RAIN_MESH_NEAR_COLOR := Color(0.18, 1.0, 0.72, 0.36)
-const RAIN_MESH_MID_COLOR := Color(1.0, 0.82, 0.2, 0.3)
+const PRECIPITATION_MESH_NEAR_COLOR := Color(0.18, 1.0, 0.72, 0.36)
+const PRECIPITATION_MESH_MID_COLOR := Color(1.0, 0.82, 0.2, 0.3)
 
-var _rain_volume_gizmo_plugin: RainVolumeGizmoPlugin
+var _precipitation_volume_gizmo_plugin: PrecipitationVolumeGizmoPlugin
 var _weather_probes_button: CheckBox
-var _rain_meshes_button: CheckBox
+var _precipitation_meshes_button: CheckBox
 var _probe_refresh_timer: Timer
 var _probe_mesh: SphereMesh
 var _probe_material: StandardMaterial3D
 var _probe_instance_rids: Array[RID] = []
 var _preview_weather_node_ids: Array[int] = []
-var _debug_rain_mesh_node_ids: Array[int] = []
-var _rain_mesh_sync_accumulator: float = 0.0
+var _debug_precipitation_mesh_node_ids: Array[int] = []
+var _precipitation_mesh_sync_accumulator: float = 0.0
+
+
+func _enable_plugin() -> void:
+    add_autoload_singleton(SERVER_NAME, SERVER_PATH)
+
+
+func _disable_plugin() -> void:
+    remove_autoload_singleton(SERVER_NAME)
 
 
 func _enter_tree() -> void:
-    WeatherServer.ensure_wind_project_settings()
+    # the singleton the editor runs, once the project has it (a plugin just enabled: from the next
+    # start)
+    var server: Node = get_tree().root.get_node_or_null(NodePath(SERVER_NAME))
+    if server:
+        server.ensure_wind_project_settings()
     WeatherSettings.register()
-    _rain_volume_gizmo_plugin = RAIN_VOLUME_GIZMO_PLUGIN_SCRIPT.new()
-    _rain_volume_gizmo_plugin.undo_redo = get_undo_redo()
-    add_node_3d_gizmo_plugin(_rain_volume_gizmo_plugin)
+    _precipitation_volume_gizmo_plugin = PRECIPITATION_VOLUME_GIZMO_PLUGIN_SCRIPT.new()
+    _precipitation_volume_gizmo_plugin.undo_redo = get_undo_redo()
+    add_node_3d_gizmo_plugin(_precipitation_volume_gizmo_plugin)
     _weather_probes_button = CheckBox.new()
     _weather_probes_button.text = PROBE_BUTTON_TEXT
-    _weather_probes_button.tooltip_text = "Show weather rain probes in the 3D editor viewport."
+    _weather_probes_button.tooltip_text = "Show the weather's precipitation probes in the 3D editor viewport."
     _weather_probes_button.toggled.connect(_on_weather_probes_toggled)
     add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, _weather_probes_button)
-    _rain_meshes_button = CheckBox.new()
-    _rain_meshes_button.text = RAIN_MESHES_BUTTON_TEXT
-    _rain_meshes_button.tooltip_text = "Show rain mesh spawn positions in the 3D editor viewport."
-    _rain_meshes_button.toggled.connect(_on_rain_meshes_toggled)
-    add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, _rain_meshes_button)
+    _precipitation_meshes_button = CheckBox.new()
+    _precipitation_meshes_button.text = PRECIPITATION_MESHES_BUTTON_TEXT
+    _precipitation_meshes_button.tooltip_text = "Show the precipitation meshes' spawn positions in the 3D editor viewport."
+    _precipitation_meshes_button.toggled.connect(_on_precipitation_meshes_toggled)
+    add_control_to_container(CONTAINER_SPATIAL_EDITOR_MENU, _precipitation_meshes_button)
     _probe_refresh_timer = Timer.new()
     _probe_refresh_timer.wait_time = PROBE_REFRESH_INTERVAL
     _probe_refresh_timer.one_shot = false
@@ -52,7 +68,7 @@ func _enter_tree() -> void:
 
 func _exit_tree() -> void:
     _clear_probe_preview()
-    _clear_rain_mesh_preview()
+    _clear_precipitation_mesh_preview()
     _clear_registered_probe_configs()
     if _probe_refresh_timer != null:
         _probe_refresh_timer.stop()
@@ -62,13 +78,13 @@ func _exit_tree() -> void:
         remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _weather_probes_button)
         _weather_probes_button.queue_free()
         _weather_probes_button = null
-    if _rain_meshes_button != null:
-        remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _rain_meshes_button)
-        _rain_meshes_button.queue_free()
-        _rain_meshes_button = null
-    if _rain_volume_gizmo_plugin != null:
-        remove_node_3d_gizmo_plugin(_rain_volume_gizmo_plugin)
-        _rain_volume_gizmo_plugin = null
+    if _precipitation_meshes_button != null:
+        remove_control_from_container(CONTAINER_SPATIAL_EDITOR_MENU, _precipitation_meshes_button)
+        _precipitation_meshes_button.queue_free()
+        _precipitation_meshes_button = null
+    if _precipitation_volume_gizmo_plugin != null:
+        remove_node_3d_gizmo_plugin(_precipitation_volume_gizmo_plugin)
+        _precipitation_volume_gizmo_plugin = null
 
 
 func _handles(object: Object) -> bool:
@@ -89,12 +105,12 @@ func _on_weather_probes_toggled(_enabled: bool) -> void:
         _clear_registered_probe_configs()
 
 
-func _on_rain_meshes_toggled(_enabled: bool) -> void:
-    if _rain_meshes_button != null and _rain_meshes_button.button_pressed:
-        _rain_mesh_sync_accumulator = RAIN_MESH_SYNC_INTERVAL
+func _on_precipitation_meshes_toggled(_enabled: bool) -> void:
+    if _precipitation_meshes_button != null and _precipitation_meshes_button.button_pressed:
+        _precipitation_mesh_sync_accumulator = PRECIPITATION_MESH_SYNC_INTERVAL
         _sync_debug_preview(true)
     else:
-        _clear_rain_mesh_preview()
+        _clear_precipitation_mesh_preview()
     _update_refresh_timer_state()
     if not _is_any_debug_preview_enabled():
         _clear_registered_probe_configs()
@@ -104,7 +120,7 @@ func _on_probe_refresh_timeout() -> void:
     _sync_weather_node_editor_preview_cameras(_get_editor_camera())
     if not _is_any_debug_preview_enabled():
         return
-    _rain_mesh_sync_accumulator += PROBE_REFRESH_INTERVAL
+    _precipitation_mesh_sync_accumulator += PROBE_REFRESH_INTERVAL
     _sync_debug_preview(false)
 
 
@@ -115,17 +131,17 @@ func _get_editor_camera() -> Camera3D:
     return editor_viewport.get_camera_3d()
 
 
-func _sync_debug_preview(force_rain_mesh_sync: bool = false) -> void:
+func _sync_debug_preview(force_precipitation_mesh_sync: bool = false) -> void:
     var camera := _get_editor_camera()
     _sync_weather_node_editor_preview_cameras(camera)
 
-    if _rain_meshes_button != null and _rain_meshes_button.button_pressed:
-        if force_rain_mesh_sync or _rain_mesh_sync_accumulator >= RAIN_MESH_SYNC_INTERVAL:
-            _sync_rain_mesh_debug_preview()
-            _rain_mesh_sync_accumulator = 0.0
+    if _precipitation_meshes_button != null and _precipitation_meshes_button.button_pressed:
+        if force_precipitation_mesh_sync or _precipitation_mesh_sync_accumulator >= PRECIPITATION_MESH_SYNC_INTERVAL:
+            _sync_precipitation_mesh_debug_preview()
+            _precipitation_mesh_sync_accumulator = 0.0
     else:
-        _clear_rain_mesh_preview()
-        _rain_mesh_sync_accumulator = 0.0
+        _clear_precipitation_mesh_preview()
+        _precipitation_mesh_sync_accumulator = 0.0
 
     if camera == null:
         _clear_probe_preview()
@@ -144,7 +160,7 @@ func _sync_debug_preview(force_rain_mesh_sync: bool = false) -> void:
 
 
 func _sync_probe_preview(world_3d: World3D, camera: Camera3D) -> void:
-    var probe_positions := WeatherServer.get_registered_visible_rain_probe_positions(world_3d, camera.global_transform, camera)
+    var probe_positions := WeatherServer.get_registered_visible_precipitation_probe_positions(world_3d, camera.global_transform, camera)
     _ensure_probe_mesh_resources()
     _ensure_instance_count(_probe_instance_rids, probe_positions.size(), _probe_mesh.get_rid(), RID(), world_3d)
 
@@ -161,22 +177,22 @@ func _sync_probe_preview(world_3d: World3D, camera: Camera3D) -> void:
         RenderingServer.instance_set_scenario(probe_instance, world_3d.scenario)
 
 
-func _sync_rain_mesh_debug_preview() -> void:
+func _sync_precipitation_mesh_debug_preview() -> void:
     var active_weather_node_ids: Array[int] = []
     for weather_node in _get_edited_weather_nodes():
         if weather_node == null:
             continue
         active_weather_node_ids.append(weather_node.get_instance_id())
-        weather_node.set_rain_mesh_debug_preview(true, RAIN_MESH_NEAR_COLOR, RAIN_MESH_MID_COLOR)
+        weather_node.set_precipitation_mesh_debug_preview(true, PRECIPITATION_MESH_NEAR_COLOR, PRECIPITATION_MESH_MID_COLOR)
 
-    for weather_node_id in _debug_rain_mesh_node_ids:
+    for weather_node_id in _debug_precipitation_mesh_node_ids:
         if active_weather_node_ids.has(weather_node_id):
             continue
         var stale_node := instance_from_id(weather_node_id) as WeatherNode
         if stale_node != null:
-            stale_node.set_rain_mesh_debug_preview(false, RAIN_MESH_NEAR_COLOR, RAIN_MESH_MID_COLOR)
+            stale_node.set_precipitation_mesh_debug_preview(false, PRECIPITATION_MESH_NEAR_COLOR, PRECIPITATION_MESH_MID_COLOR)
 
-    _debug_rain_mesh_node_ids = active_weather_node_ids
+    _debug_precipitation_mesh_node_ids = active_weather_node_ids
 
 
 func _ensure_probe_mesh_resources() -> void:
@@ -227,12 +243,12 @@ func _clear_probe_preview() -> void:
     _probe_instance_rids.clear()
 
 
-func _clear_rain_mesh_preview() -> void:
-    for weather_node_id in _debug_rain_mesh_node_ids:
+func _clear_precipitation_mesh_preview() -> void:
+    for weather_node_id in _debug_precipitation_mesh_node_ids:
         var weather_node := instance_from_id(weather_node_id) as WeatherNode
         if weather_node != null:
-            weather_node.set_rain_mesh_debug_preview(false, RAIN_MESH_NEAR_COLOR, RAIN_MESH_MID_COLOR)
-    _debug_rain_mesh_node_ids.clear()
+            weather_node.set_precipitation_mesh_debug_preview(false, PRECIPITATION_MESH_NEAR_COLOR, PRECIPITATION_MESH_MID_COLOR)
+    _debug_precipitation_mesh_node_ids.clear()
 
 
 func _clear_registered_probe_configs() -> void:
@@ -247,7 +263,7 @@ func _clear_registered_probe_configs() -> void:
         return
 
     for weather_node_id in _preview_weather_node_ids:
-        WeatherServer.clear_visible_rain_probe_field_config(world_3d, weather_node_id)
+        WeatherServer.clear_visible_precipitation_probe_field_config(world_3d, weather_node_id)
     _preview_weather_node_ids.clear()
 
 
@@ -259,17 +275,17 @@ func _sync_registered_probe_configs(world_3d: World3D) -> void:
 
         var weather_node_id: int = weather_node.get_instance_id()
         active_weather_node_ids.append(weather_node_id)
-        WeatherServer.configure_visible_rain_probe_field(
+        WeatherServer.configure_visible_precipitation_probe_field(
             world_3d,
             weather_node_id,
-            weather_node.rain_probe_max_count,
-            weather_node.rain_probe_distance
+            weather_node.precipitation_probe_max_count,
+            weather_node.precipitation_probe_distance
         )
 
     for weather_node_id in _preview_weather_node_ids:
         if active_weather_node_ids.has(weather_node_id):
             continue
-        WeatherServer.clear_visible_rain_probe_field_config(world_3d, weather_node_id)
+        WeatherServer.clear_visible_precipitation_probe_field_config(world_3d, weather_node_id)
 
     _preview_weather_node_ids = active_weather_node_ids
 
@@ -286,7 +302,7 @@ func _update_refresh_timer_state() -> void:
 func _is_any_debug_preview_enabled() -> bool:
     return (
         (_weather_probes_button != null and _weather_probes_button.button_pressed)
-        or (_rain_meshes_button != null and _rain_meshes_button.button_pressed)
+        or (_precipitation_meshes_button != null and _precipitation_meshes_button.button_pressed)
     )
 
 

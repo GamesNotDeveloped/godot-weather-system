@@ -1,0 +1,62 @@
+[gd_scene format=3]
+
+[ext_resource type="Material" path="res://materials/concrete.tres" id="1_hw1oy"]
+[ext_resource type="Material" path="res://materials/steel.tres" id="2_6t6td"]
+[ext_resource type="Material" path="res://materials/roof_tiles.tres" id="3_mwhut"]
+[ext_resource type="Script" path="res://addons/gnd_weather/PrecipitationVolume.gd" id="4_iyhsf"]
+
+[node name="Platform" type="Node3D" unique_id=1023217195]
+
+[node name="Edge" type="CSGBox3D" parent="." unique_id=417598392]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+size = Vector3(3.5, 0.6, 24)
+material = ExtResource("1_hw1oy")
+
+[node name="PostNorthWest" type="CSGBox3D" parent="." unique_id=1581718323]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.2, 1.9, -4.5)
+size = Vector3(0.14, 2.6, 0.14)
+material = ExtResource("2_6t6td")
+
+[node name="PostNorthEast" type="CSGBox3D" parent="." unique_id=1831882218]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2, 1.9, -4.5)
+size = Vector3(0.14, 2.6, 0.14)
+material = ExtResource("2_6t6td")
+
+[node name="PostSouthWest" type="CSGBox3D" parent="." unique_id=765139333]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.2, 1.9, 4.5)
+size = Vector3(0.14, 2.6, 0.14)
+material = ExtResource("2_6t6td")
+
+[node name="PostSouthEast" type="CSGBox3D" parent="." unique_id=1661758664]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2, 1.9, 4.5)
+size = Vector3(0.14, 2.6, 0.14)
+material = ExtResource("2_6t6td")
+
+[node name="Roof" type="CSGBox3D" parent="." unique_id=822289091]
+transform = Transform3D(0.9975641, -0.06975647, 0, 0.06975647, 0.9975641, 0, 0, 0, 1, 0, 3.28, 0)
+size = Vector3(3.6, 0.16, 11)
+material = ExtResource("3_mwhut")
+
+[node name="Bench" type="CSGBox3D" parent="." unique_id=1640381194]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.9, 0.82, 1.5)
+size = Vector3(0.5, 0.45, 1.8)
+material = ExtResource("2_6t6td")
+
+[node name="Shelter" type="VisualInstance3D" parent="." unique_id=1188387012]
+unique_name_in_owner = false
+process_mode = 0
+process_priority = 0
+process_physics_priority = 0
+process_thread_group = 0
+physics_interpolation_mode = 0
+auto_translate_mode = 0
+editor_description = ""
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.95, 0)
+rotation_edit_mode = 0
+rotation_order = 2
+top_level = false
+visible = true
+visibility_parent = NodePath("")
+layers = 1
+script = ExtResource("4_iyhsf")
+size = Vector3(3.4, 2.7, 10.6)

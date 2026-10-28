@@ -1,0 +1,44 @@
+[gd_scene format=3]
+
+[ext_resource type="Material" path="res://materials/plaster.tres" id="1_uqa32"]
+[ext_resource type="Material" path="res://materials/roof_tiles.tres" id="2_m5xk7"]
+[ext_resource type="Material" path="res://materials/window.tres" id="3_ar4ri"]
+[ext_resource type="Material" path="res://materials/door.tres" id="4_yrjot"]
+
+[node name="House" type="Node3D" unique_id=588582102]
+
+[node name="Walls" type="CSGBox3D" parent="." unique_id=870349565]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8, 0)
+size = Vector3(6, 3.6, 5)
+material = ExtResource("1_uqa32")
+
+[node name="RoofFront" type="CSGBox3D" parent="." unique_id=1127391346]
+transform = Transform3D(1, 0, 0, 0, 0.7880108, -0.6156615, 0, 0.6156615, 0.7880108, 0, 4.45, 1.32)
+size = Vector3(6.6, 0.18, 3.4)
+material = ExtResource("2_m5xk7")
+
+[node name="RoofBack" type="CSGBox3D" parent="." unique_id=1936354436]
+transform = Transform3D(1, 0, 0, 0, 0.7880108, 0.6156615, 0, -0.6156615, 0.7880108, 0, 4.45, -1.32)
+size = Vector3(6.6, 0.18, 3.4)
+material = ExtResource("2_m5xk7")
+
+[node name="Gables" type="CSGPolygon3D" parent="." unique_id=231510707]
+transform = Transform3D(-4.371139e-08, 0, -1, 0, 1, 0, 1, 0, -4.371139e-08, 2.98, 3.6, 0)
+polygon = PackedVector2Array(-2.5, 0, 2.5, 0, 0, 1.95)
+depth = 5.96
+material = ExtResource("1_uqa32")
+
+[node name="WindowLeft" type="CSGBox3D" parent="." unique_id=1613608090]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.6, 2, 2.52)
+size = Vector3(1, 1.2, 0.08)
+material = ExtResource("3_ar4ri")
+
+[node name="WindowRight" type="CSGBox3D" parent="." unique_id=1508857692]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.6, 2, 2.52)
+size = Vector3(1, 1.2, 0.08)
+material = ExtResource("3_ar4ri")
+
+[node name="Door" type="CSGBox3D" parent="." unique_id=786703129]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 2.52)
+size = Vector3(1, 2.1, 0.08)
+material = ExtResource("4_yrjot")
