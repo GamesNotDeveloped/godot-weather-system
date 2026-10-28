@@ -86,11 +86,11 @@ const float GND_SNOW_COVER_DEPTH = 0.03;
 const vec3 GND_SNOW_ALBEDO = vec3(0.86, 0.88, 0.92);
 const vec3 GND_SLUSH_ALBEDO = vec3(0.5, 0.53, 0.55);
 
-// How near a pixel is for the wet's and the standing water's reflections to show (1 - 0), by how wide it is in the
-// world (length(fwidth(world_position)), fragment() only): some 30 m off at 1080p for a surface facing
-// the eye, gone by some 55 m, the sooner for the ground seen aslant. Beyond, the wet is as rough (0.7)
-// as the screen space reflections skip and the water (0.2) as SDFGI's reflections do: the wet scenery reflected everywhere cost them every
-// pixel of the screen
+// How near a pixel is for the wet's and the standing water's reflections to show (1 - 0), by how wide
+// it is in the world (length(fwidth(world_position)), fragment() only): some 30 m off at 1080p for a
+// surface facing the eye, gone by some 55 m, the sooner for the ground seen aslant. Beyond, the wet
+// is as rough (0.7) as the screen space reflections skip, and no water stands: the wet scenery
+// reflected everywhere cost them every pixel of the screen, the far puddles the sun's glare
 float gnd_weather_reflections_near(float pixel_size) {
 	return 1.0 - smoothstep(0.03, 0.06, pixel_size);
 }
@@ -136,6 +136,12 @@ float gnd_weather_snow_patches(vec2 world_xz, float cover) {
 	return max(dusting, lying);
 }
 
+// How flat a surface is for water to stand on it (0 - 1) by its normal's y: all of it up to some
+// 3 degrees, none past some 10 - it runs off a steeper slope
+float gnd_weather_flat(float normal_y) {
+	return smoothstep(0.985, 0.9986, normal_y);
+}
+
 // How deep a point lies in the ground's hollows (0 - 1, 1 the deepest): a lumpy surface a few
 // metres across with dips a span across in it, where the water gathers. A ground's material can
 // sink its surface by it (the demo's does) so the puddles lie in its dips
@@ -161,7 +167,7 @@ float gnd_weather_standing_water_at(vec3 world_normal, vec3 world_position, floa
 	if (level <= 0.001) {
 		return 0.0;
 	}
-	float flat_up = smoothstep(0.85, 0.97, normalize(world_normal).y);
+	float flat_up = gnd_weather_flat(normalize(world_normal).y);
 	float shore = 1.0 - level * 0.6;
 	return flat_up * smoothstep(shore, shore + 0.04, gnd_weather_hollows(world_position.xz));
 }
@@ -296,10 +302,11 @@ void gnd_weather_surface_puddled(inout vec3 surface_albedo, inout float surface_
 		surface_roughness = mix(surface_roughness, min(surface_roughness, mix(0.7, 0.18, reflections_near)), wet * 0.85);
 	}
 	// standing water: a mirror over a darker ground, ice in a frost
-	float water = gnd_weather_standing_water_at(world_normal, world_position, puddling, local);
+	// gone beyond the reflections' reach, as the wet's sheen: far off it was the sun's glare
+	float water = gnd_weather_standing_water_at(world_normal, world_position, puddling, local) * reflections_near;
 	float ice = gnd_weather_water_ice(local.a);
 	surface_albedo *= mix(1.0, mix(0.45, 0.8, ice), water);
-	surface_roughness = mix(surface_roughness, max(mix(0.02, 0.1, ice), 0.2 * (1.0 - reflections_near)), water);
+	surface_roughness = mix(surface_roughness, mix(0.02, 0.1, ice), water);
 	// soaked, it greys to a glistening slush
 	float snow = gnd_weather_snow_exists ? gnd_weather_snow_at(world_normal, world_position, local) : 0.0;
 	float slush = clamp(gnd_snow_wetness * 0.8, 0.0, 1.0);
@@ -340,11 +347,12 @@ float gnd_weather_apply_heated(inout vec3 surface_albedo, inout float surface_ro
 
 	// the water standing in the hollows: a mirror over a darker ground, its level face ringed by the
 	// rain, ice in a frost
-	float water = gnd_weather_standing_water_at(normal, world_position, puddling, local);
+	// gone beyond the reflections' reach, as the wet's sheen: far off it was the sun's glare
+	float water = gnd_weather_standing_water_at(normal, world_position, puddling, local) * reflections_near;
 	if (water > 0.001) {
 		float ice = gnd_weather_water_ice(local.a);
 		surface_albedo *= mix(1.0, mix(0.45, 0.8, ice), water);
-		surface_roughness = mix(surface_roughness, max(mix(0.02, 0.1, ice), 0.2 * (1.0 - reflections_near)), water);
+		surface_roughness = mix(surface_roughness, mix(0.02, 0.1, ice), water);
 		vec2 ripples = gnd_weather_rain_ripples_at(world_position.xz, footprint) * (1.0 - ice);
 		weather_normal = normalize(mix(normal, normalize(vec3(-ripples.x, 1.0, -ripples.y)), water));
 	}
