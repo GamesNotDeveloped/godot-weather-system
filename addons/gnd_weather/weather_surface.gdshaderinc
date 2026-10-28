@@ -190,6 +190,17 @@ vec2 gnd_weather_rain_ripples_at(vec2 world_xz, float footprint) {
 	return slope * 0.25 * faded;
 }
 
+// gnd_weather_snow() with the weather there given (gnd_weather_local()'s)
+float gnd_weather_snow_at(vec3 world_normal, vec3 world_position, vec4 local) {
+	float facing_up = smoothstep(0.25, 0.75, normalize(world_normal).y);
+	float depth = gnd_snow_depth * local.r * gnd_weather_snow_kept(local.a, 0.0);
+	float cover = clamp(depth * gnd_weather_snow_heaping(world_position.xz) / GND_SNOW_COVER_DEPTH, 0.0, 1.0);
+	if (facing_up <= 0.0 || cover <= 0.001) {
+		return 0.0;
+	}
+	return facing_up * gnd_weather_snow_patches(world_position.xz, cover);
+}
+
 // How much snow lies on a surface (0 - 1): on what faces up, in patches while the cover is thin, as
 // much of it as lies there (gnd_weather_local())
 float gnd_weather_snow(vec3 world_normal, vec3 world_position) {
@@ -200,13 +211,7 @@ float gnd_weather_snow(vec3 world_normal, vec3 world_position) {
 	if (facing_up <= 0.0) {
 		return 0.0;
 	}
-	vec4 local = gnd_weather_local(world_position);
-	float depth = gnd_snow_depth * local.r * gnd_weather_snow_kept(local.a, 0.0);
-	float cover = clamp(depth * gnd_weather_snow_heaping(world_position.xz) / GND_SNOW_COVER_DEPTH, 0.0, 1.0);
-	if (cover <= 0.001) {
-		return 0.0;
-	}
-	return facing_up * gnd_weather_snow_patches(world_position.xz, cover);
+	return gnd_weather_snow_at(world_normal, world_position, gnd_weather_local(world_position));
 }
 
 // The deepest a surface is raised by the snow, in metres, however deep it lies (#define it before
@@ -215,6 +220,13 @@ float gnd_weather_snow(vec3 world_normal, vec3 world_position) {
 #ifndef GND_SNOW_MAX_DEPTH
 #define GND_SNOW_MAX_DEPTH 1.0
 #endif
+
+// gnd_weather_snow_depth() with the weather there given (gnd_weather_local()'s)
+float gnd_weather_snow_depth_at(vec3 world_normal, vec3 world_position, vec4 local) {
+	float facing_up = smoothstep(0.5, 0.9, normalize(world_normal).y);
+	float depth = gnd_snow_depth * local.r * gnd_weather_snow_kept(local.a, 0.0) * gnd_weather_snow_heaping(world_position.xz);
+	return facing_up * min(depth, GND_SNOW_MAX_DEPTH);
+}
 
 // How deep the snow lies at a point of a surface facing up, in metres: as deep as it lies on the
 // average, heaped up here. For vertex(), to raise the surface by:
@@ -227,21 +239,23 @@ float gnd_weather_snow_depth(vec3 world_normal, vec3 world_position) {
 	if (gnd_snow_depth <= 0.0001) {
 		return 0.0;
 	}
-	float facing_up = smoothstep(0.5, 0.9, normalize(world_normal).y);
-	vec4 local = gnd_weather_local(world_position);
-	float depth = gnd_snow_depth * local.r * gnd_weather_snow_kept(local.a, 0.0) * gnd_weather_snow_heaping(world_position.xz);
-	return facing_up * min(depth, GND_SNOW_MAX_DEPTH);
+	return gnd_weather_snow_depth_at(world_normal, world_position, gnd_weather_local(world_position));
 }
 
 // The surface's normal turned by the heaps the snow lies in (world space), where there is snow
 vec3 gnd_weather_snow_normal(vec3 world_normal, vec3 world_position) {
+	if (gnd_snow_depth <= 0.0001) {
+		return world_normal;
+	}
 	float e = 0.15;
-	float here = gnd_weather_snow_depth(world_normal, world_position);
+	// the probes' once: they stand metres apart, the samples a span
+	vec4 local = gnd_weather_local(world_position);
+	float here = gnd_weather_snow_depth_at(world_normal, world_position, local);
 	if (here <= 0.0001) {
 		return world_normal;
 	}
-	float dx = gnd_weather_snow_depth(world_normal, world_position + vec3(e, 0.0, 0.0)) - here;
-	float dz = gnd_weather_snow_depth(world_normal, world_position + vec3(0.0, 0.0, e)) - here;
+	float dx = gnd_weather_snow_depth_at(world_normal, world_position + vec3(e, 0.0, 0.0), local) - here;
+	float dz = gnd_weather_snow_depth_at(world_normal, world_position + vec3(0.0, 0.0, e), local) - here;
 	return normalize(world_normal - vec3(dx, 0.0, dz) / e);
 }
 
@@ -259,7 +273,7 @@ void gnd_weather_surface_puddled(inout vec3 surface_albedo, inout float surface_
 	surface_albedo *= mix(1.0, mix(0.45, 0.8, ice), water);
 	surface_roughness = mix(surface_roughness, mix(0.02, 0.1, ice), water);
 	// soaked, it greys to a glistening slush
-	float snow = gnd_weather_snow(world_normal, world_position);
+	float snow = gnd_snow_depth > 0.0001 ? gnd_weather_snow_at(world_normal, world_position, local) : 0.0;
 	float slush = clamp(gnd_snow_wetness * 0.8, 0.0, 1.0);
 	surface_albedo = mix(surface_albedo, mix(GND_SNOW_ALBEDO, GND_SLUSH_ALBEDO, slush), snow);
 	surface_roughness = mix(surface_roughness, mix(0.75, 0.3, slush), snow);

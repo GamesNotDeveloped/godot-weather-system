@@ -44,10 +44,8 @@ uniform float roughness : hint_range(0.0, 1.0) = 0.9;
 #include "res://addons/gnd_weather/precipitation_exclusion.gdshaderinc"
 #include "res://addons/gnd_weather/precipitation_camera.gdshaderinc"
 
-varying vec3 world_position;
 varying float flake_alpha;
 varying float flake_seed;
-varying vec3 flake_velocity;
 
 float hash11(float p) {
 	return fract(sin(p * 12.9898) * 43758.5453);
@@ -58,8 +56,8 @@ void vertex() {
 	vec4 custom = INSTANCE_CUSTOM;
 	// the flakes past flake_count are folded away to nothing
 	flake_alpha = 0.0;
-	world_position = vec3(0.0);
-	flake_velocity = vec3(0.0, -1.0, 0.0);
+	vec3 world_position = vec3(0.0);
+	vec3 flake_velocity = vec3(0.0, -1.0, 0.0);
 	if (flake >= float(flake_count)) {
 		VERTEX = vec3(0.0);
 	} else {
@@ -107,13 +105,16 @@ void vertex() {
 		vec3 edge = abs(relative) / half_size;
 		flake_alpha = (1.0 - smoothstep(0.7, 1.0, max(edge.x, max(edge.y, edge.z))))
 			* smoothstep(0.25, 0.9, length(view_center)) * clamp(custom.g, 0.0, 1.0);
+		// a shelter's and the probes' once a flake, not every pixel of it: thinned where the probes
+		// let less of it through (a volume's feathered edge, a partial one), none under a roof
+		flake_alpha *= precipitation_sheltered(world_position, flake_velocity) ? 0.0 : precipitation_reach(world_position);
+		if (flake_alpha <= 0.0) {
+			VERTEX = vec3(0.0);
+		}
 	}
 }
 
 void fragment() {
-	if (precipitation_sheltered(world_position, flake_velocity)) {
-		discard;
-	}
 	vec2 q = (UV - 0.5) * 2.0;
 	float radius = length(q);
 	float disc = 1.0 - smoothstep(0.35, 1.0, radius);
@@ -132,8 +133,7 @@ void fragment() {
 		float arms = pow(abs(cos(angle * 3.0)), 12.0) * (1.0 - smoothstep(0.05, 0.85, radius));
 		shape = mix(disc, max(clump * 0.85, arms), flake_detail);
 	}
-	// thinned where the probes let less of it through (a volume's feathered edge, a partial one)
-	float alpha = shape * tint.a * layer_alpha * flake_alpha * precipitation_reach(world_position);
+	float alpha = shape * tint.a * layer_alpha * flake_alpha;
 	if (alpha < 0.003) {
 		discard;
 	}

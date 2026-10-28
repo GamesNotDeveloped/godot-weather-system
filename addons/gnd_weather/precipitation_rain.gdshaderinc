@@ -43,8 +43,9 @@ uniform vec3 fall_direction = vec3(0.0, -1.0, 0.0);
 
 varying vec4 instance_custom_data;
 varying float streak_flow;
-varying vec3 world_position;
 varying float edge_fade;
+// how much of it a shelter and the probes let through, worked out at the card's corners
+varying float precipitation_open;
 
 float hash11(float p) {
 	return fract(sin(p) * 43758.5453123);
@@ -83,18 +84,19 @@ void vertex() {
 	// the gusts' waves are the world's, so taken where the drop is in it
 	point += precipitation_rain_wind(camera + point, wind, gust_strength, gust_scale, turbulence,
 		instance_custom_data.a + cycle * 0.137, variation, TIME);
-	world_position = camera + point;
+	vec3 world_position = camera + point;
+	// a shelter's and the probes' at the card's corners, not every pixel of it: thinned where the
+	// probes let less of it through (a volume's feathered edge, a partial one), none under a roof
+	precipitation_open = precipitation_sheltered(world_position, fall_direction) ? 0.0 : precipitation_reach(world_position);
 	VERTEX = mat3(VIEW_MATRIX) * point;
 	NORMAL = normalize(mat3(VIEW_MATRIX) * cross(across, down));
 }
 
 void fragment() {
-	if (precipitation_sheltered(world_position, fall_direction)) {
+	if (precipitation_open <= 0.01) {
 		discard;
 	}
-
-	// thinned where the probes let less of it through (a volume's feathered edge, a partial one)
-	float instance_alpha = clamp(instance_custom_data.g, 0.0, 1.0) * edge_fade * precipitation_reach(world_position);
+	float instance_alpha = clamp(instance_custom_data.g, 0.0, 1.0) * edge_fade * precipitation_open;
 	float variation = instance_custom_data.b;
 	float detail = instance_custom_data.a;
 	float primary_trail = UV.y;
