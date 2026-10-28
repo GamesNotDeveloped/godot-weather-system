@@ -6,11 +6,8 @@ render_mode depth_draw_opaque, cull_disabled, diffuse_burley, specular_schlick_g
 // the weather where it lies, all of it from the globals and the probes (nothing set every frame):
 // how full it is, ice over it, snow on it, the rain on it
 #include "res://addons/gnd_weather/weather_surface.gdshaderinc"
-// the rain falling on the ground (its share of the precipitation), the snow's cover, how full the
-// puddles are (a ground model of standing water's, 1 without one; past 1 flooding)
-global uniform float gnd_rain;
+// the snow's cover (the rain on the ground and how full the hollows are: weather_surface's)
 global uniform float gnd_snow_cover;
-global uniform float gnd_puddles;
 // the weather probes: how much of the precipitation reaches each (r) - a shelter over it keeps the
 // ripples off
 global uniform sampler3D gnd_weather_probes : filter_linear, repeat_enable;
@@ -18,6 +15,8 @@ global uniform sampler3D gnd_weather_probes : filter_linear, repeat_enable;
 uniform sampler2D mask_texture : source_color, filter_linear_mipmap, repeat_disable;
 uniform vec4 shallow_color : source_color = vec4(0.11, 0.15, 0.13, 1.0);
 uniform vec4 deep_color : source_color = vec4(0.03, 0.06, 0.07, 1.0);
+// how full it stays whatever the weather: a pond's 1, a puddle's 0 (only the rain's water in it)
+uniform float fed_level : hint_range(0.0, 1.0) = 0.0;
 uniform vec3 ice_tint : source_color = vec3(0.78, 0.84, 0.9);
 uniform vec3 snow_albedo : source_color = vec3(0.86, 0.88, 0.92);
 uniform float rain_ripple_threshold : hint_range(0.0, 1.0) = 0.12;
@@ -177,7 +176,7 @@ float water_height(vec2 uv, float time_value, float rain_strength, float frozen)
 void fragment() {
     // the ground where it lies: its standing water, its temperature (ice below freezing), its snow
     vec4 local = gnd_weather_local(world_position);
-    float water_level = clamp(gnd_puddles, 0.0, 1.0) * local.b;
+    float water_level = max(fed_level, clamp(gnd_puddles, 0.0, 1.0) * local.b);
     float frozen = 1.0 - clamp(local.a + 0.5, 0.0, 1.0);
     float snow_cover = clamp(gnd_snow_cover * local.r * gnd_weather_snow_kept(local.a, 0.0), 0.0, 1.0);
     // only the rain ripples it, as much of it as reaches it, and not the ice

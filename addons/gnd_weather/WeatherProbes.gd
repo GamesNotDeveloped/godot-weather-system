@@ -78,6 +78,12 @@ func release() -> void:
     RenderingServer.call_on_render_thread(_free_all)
 
 
+## The ground at the probes laid anew on the next update, as if the weather had always been as it is
+## (the open ground's set: a scenario's, a jump of its snow or its water)
+func reset_ground() -> void:
+    _reset = true
+
+
 ## The window moved: its corner's world cell now
 func set_base(base: Vector3i) -> void:
     if base != _base:

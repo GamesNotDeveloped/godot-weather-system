@@ -21,9 +21,10 @@ there is one, and works without it.
   eddies (`GndWeatherServer` extended, `rain_shader`, `snow_shader`)
 * snow lying deeper and deeper over the world's time and melting in a thaw, and the rain in
   millimetres of water wetting the surfaces and drying, for the scene's own materials - a model of
-  the ground (`WeatherGroundModel`) of more brings drifts, the walls' snow, puddles and ice
-* puddles that ripple in the rain, freeze and go under the snow, and reflect, as full as a ground
-  model of standing water fills them
+  the ground (`WeatherGroundModel`) of more brings drifts, the walls' snow and ice
+* puddles in the ground's hollows, drawn by the materials themselves: the rain past wetting the
+  ground runs off into them, they ring in the rain, freeze, soak away and dry; and ponds
+  (`PuddleSurface3D`) that keep their water
 * `PrecipitationVolume`s - shelters, closed interiors - that keep it out, a roof letting a slanting
   one in from the windward side, an enclosed one none
 * lightning and thunder in a storm; or flashes a minute and how far off they strike from a weather
@@ -79,10 +80,12 @@ void fragment() {
 ```
 
 `gnd_weather_surface_puddled(albedo, roughness, world_normal, world_position, puddling)` takes how
-much water the surface would hold standing - a pavement 1, a soil 0.3 or so, a gravel that lets
-it through 0 (`gnd_weather_surface()` takes 0.5) - for a
-`weather_surface.gdshaderinc` of a weather that draws it, served in this one's place; this one has
-none. `gnd_weather_apply()` sets the normal as well: the snow's heaps in the light.
+much water the surface holds standing - a pavement 1, a soil 0.3 or so, a gravel that lets it
+through 0 (`gnd_weather_surface()` takes 0.5): the puddles lie in its hollows
+(`gnd_weather_hollows()`), the deepest first, spreading as they fill and over them as it floods,
+a dark mirror, ice in a frost. `gnd_weather_apply()` sets the normal as well: the snow's heaps and
+the rain's rings on the water in the light. A terrain's material can sink its surface by
+`gnd_weather_hollows()` (the demo's ground does), so the puddles lie in its dips.
 
 A dense mesh - a terrain - can heap the snow up as well:
 
@@ -112,38 +115,43 @@ The cover is full from some 3 cm.
 
 The rain is water in millimetres: `rain_mm_per_hour` (50) at the full intensity, as its square (a
 heavy 0.5 is some 12, a light 0.2 is 2). The first millimetre, and the melt's water, wet the
-surfaces through (`wetness` 1) - a downpour in a minute; the rest runs off. The water dries off
-`drying_mm_per_hour` (0.3, faster the warmer, and the drier the air: `air_humidity` 0.7 is that rate,
-a saturated air dries nothing).
+surfaces through (`wetness` 1) - a downpour in a minute; the rest runs off into the hollows, the
+puddles: 5 mm fills them to the brim (`puddles` 1), up to 15 mm floods over them. The ground soaks
+them up, `drainage_mm_per_hour` (2, hardly at all frozen). The water dries off `drying_mm_per_hour`
+(0.3, faster the warmer, and the drier the air: `air_humidity` 0.7 is that rate, a saturated air
+dries nothing).
 
 That is `WeatherSimpleGround`, a world's ground model unless another is set:
 `WeatherServer.set_ground_model(world, model)` with a `WeatherGroundModel` of your own - its keys of
 the weather's state and rates, its `advance()` over the world's hours, `set_ground()`, the ground's
 globals it sets (`get_globals()`), what it tells (`get_report()`) and, each frame of a `WeatherNode`,
 `process()` with how the rain falls and the snow flies (`get_rain_fall_direction()`,
-`get_snow_flight()`). Extending `WeatherSimpleGround` keeps its snow and wet.
+`get_snow_flight()`). Extending `WeatherSimpleGround` keeps its snow, wet and puddles.
 
 The ground's state is in the shader globals `gnd_snow_depth` (m), `gnd_snow_cover`, `gnd_wetness`,
-`gnd_rain`, `gnd_snow_wetness` (0 - 1) and `gnd_air_temperature` (°C), for shaders of your own, and in
+`gnd_rain`, `gnd_snow_wetness` (0 - 1), `gnd_puddles` (0 - 3) and `gnd_air_temperature` (°C), for shaders of your own, and in
 `WeatherServer.get_weather_state()`; `WeatherServer.set_ground_state(world, {"snow_depth": ...,
 "wetness": ...})` sets it, as the node's properties do. A ground model of more sets globals of its
 own (`WeatherServer.set_ground_global()`, added where the project does not declare them), for
-materials of its own: `weather_surface.gdshaderinc` has the snow lying and the wet. A project whose materials read the ground's state under names of
-its own sets `gnd_weather/ground_globals_prefix` (e.g. `game_`: `game_snow_depth`, ...); the
+materials of its own: `weather_surface.gdshaderinc` has the snow lying, the wet and the puddles. A
+project whose materials read the ground's state under names of its own sets `gnd_weather/ground_globals_prefix` (e.g. `game_`: `game_snow_depth`, ...); the
 wind's globals keep theirs.
 
-## Puddles
+## Ponds
 
-`PuddleSurface3D`: a `mesh` (a plane) and a `mask_texture` whose alpha is the puddle's depth - a
-round gradient will do: its shore wanders and its bottom is uneven (`shore_irregularity`,
-`shore_scale`), each puddle its own, so it dries into a few smaller ones. Its shader takes the
-weather where it lies, from the ground's globals and the weather probes, nothing of it worked out
-on the CPU nor every frame: it fills with a ground model's standing water (`gnd_puddles`, full
-without one) as much as stands there, ripples with the rain (`gnd_rain`) as much of it as reaches it
+The puddles are the materials' (`gnd_weather_surface_puddled()`). A body of water of its own - a
+pond, a deep puddle in a basin the ground sinks into - is a `PuddleSurface3D`: a `mesh` (a plane)
+and a `mask_texture` whose alpha is its depth - a round gradient will do: its shore wanders and its
+bottom is uneven (`shore_irregularity`, `shore_scale`). `fed_level` is how full it stays whatever
+the weather - a pond's 1 (the demo's); 0 and it is as full as the hollows, drying into a few
+smaller ones. Its shader takes the weather where it lies, from the ground's globals and the weather
+probes, nothing of it worked out on the CPU nor every frame: it fills with the standing water
+(`gnd_puddles`) as much as stands there, ripples with the rain (`gnd_rain`) as much of it as reaches it
 (a shelter over it keeps the ripples off), freezes to a still sheet below 0 °C there - a heat source
 keeps it open - and goes under the snow lying there. It reads the globals by their `gnd_` names:
-it is for a project without `gnd_weather/ground_globals_prefix`. It is opaque, so the screen-space reflections take it in
-(it no longer refracts what is under it: `refraction_strength` and `refraction_mix` are gone).
+it is for a project without `gnd_weather/ground_globals_prefix`. It is opaque, so the screen-space
+reflections take it in (it no longer refracts what is under it: `refraction_strength` and
+`refraction_mix` are gone).
 
 ## Shelters
 

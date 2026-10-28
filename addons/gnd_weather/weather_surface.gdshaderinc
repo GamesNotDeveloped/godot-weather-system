@@ -28,6 +28,10 @@ global uniform float gnd_air_temperature;
 global uniform float gnd_snow_depth;
 // how wet the lying snow is (0 - 1): soaked by a rain or a thaw, grey slush
 global uniform float gnd_snow_wetness;
+// the rain falling on the ground (its share of the precipitation), and how full the ground's hollows
+// are of standing water (1 to the brim, up to 3 flooding over)
+global uniform float gnd_rain;
+global uniform float gnd_puddles;
 
 // the weather probes' (WeatherProbes): the open ground's share of the snow (r), the wet (g) and the
 // standing water (b) at each, and its temperature (a, °C) - addressed round in the texture - their
@@ -115,6 +119,77 @@ float gnd_weather_snow_patches(vec2 world_xz, float cover) {
 	return max(dusting, lying);
 }
 
+// How deep a point lies in the ground's hollows (0 - 1, 1 the deepest): a lumpy surface a few
+// metres across with dips a span across in it, where the water gathers. A ground's material can
+// sink its surface by it (the demo's does) so the puddles lie in its dips
+float gnd_weather_hollows(vec2 world_xz) {
+	vec2 p = world_xz * 0.32;
+	float hollows = gnd_weather_noise(p) * 0.55;
+	p = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8)) * p * 2.07 + 7.3;
+	hollows += gnd_weather_noise(p) * 0.3;
+	p = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8)) * p * 2.3 + 1.9;
+	hollows += gnd_weather_noise(p) * 0.15;
+	return hollows;
+}
+
+// How much water stands on a surface facing up (0 - 1): first in its deepest hollows, spreading as
+// they fill and over them as it floods (gnd_puddles past 1), with a sharp shore, as much as stands
+// where it is (local: gnd_weather_local()); puddling - how much of it the surface holds (a paving or
+// a platform 1, a soil that soaks it up 0.3 or so, a gravel that lets it through 0)
+float gnd_weather_standing_water_at(vec3 world_normal, vec3 world_position, float puddling, vec4 local) {
+	float level = clamp(gnd_puddles, 0.0, 3.0) * clamp(puddling, 0.0, 1.0) * local.b;
+	if (level <= 0.001) {
+		return 0.0;
+	}
+	float flat_up = smoothstep(0.85, 0.97, normalize(world_normal).y);
+	float shore = 1.0 - level * 0.6;
+	return flat_up * smoothstep(shore, shore + 0.04, gnd_weather_hollows(world_position.xz));
+}
+
+float gnd_weather_standing_water(vec3 world_normal, vec3 world_position, float puddling) {
+	return gnd_weather_standing_water_at(world_normal, world_position, puddling, gnd_weather_local(world_position));
+}
+
+// How far the standing water is frozen at temperature (°C): ice from half a degree below freezing
+float gnd_weather_water_ice(float temperature) {
+	return smoothstep(0.5, -1.0, temperature);
+}
+
+// The rain's rings on the standing water: the slope (x, z) they give its face. Drops land in cells
+// a span or so across, as many of them as hard as it rains, each spreading a ring that fades;
+// footprint - how wide a pixel is there (length(fwidth(world_xz)))
+vec2 gnd_weather_rain_ripples_at(vec2 world_xz, float footprint) {
+	float rain = clamp(gnd_rain, 0.0, 1.0);
+	// gone where a pixel is wider than the rings, which sparkled in the distance
+	float faded = 1.0 - smoothstep(0.015, 0.06, footprint);
+	if (rain <= 0.01 || faded <= 0.0) {
+		return vec2(0.0);
+	}
+	vec2 slope = vec2(0.0);
+	for (int layer = 0; layer < 2; layer++) {
+		float size = layer == 0 ? 0.33 : 0.21;
+		vec2 p = world_xz / size + float(layer) * 17.3;
+		vec2 cell = floor(p);
+		for (int j = -1; j <= 1; j++) {
+			for (int i = -1; i <= 1; i++) {
+				vec2 c = cell + vec2(float(i), float(j));
+				if (gnd_weather_hash(c * 1.7 + 4.1) > rain) {
+					continue;
+				}
+				float h = gnd_weather_hash(c + 0.37);
+				vec2 centre = c + vec2(gnd_weather_hash(c), gnd_weather_hash(c + 9.1));
+				float age = fract(TIME * mix(0.9, 1.4, h) + h * 7.0);
+				vec2 d = p - centre;
+				float distance_to = length(d);
+				float band = distance_to - age * 0.9;
+				float envelope = (1.0 - age) * (1.0 - age) * exp(-band * band * 60.0);
+				slope += d / max(distance_to, 0.001) * cos(band * 40.0) * envelope;
+			}
+		}
+	}
+	return slope * 0.25 * faded;
+}
+
 // How much snow lies on a surface (0 - 1): on what faces up, in patches while the cover is thin, as
 // much of it as lies there (gnd_weather_local())
 float gnd_weather_snow(vec3 world_normal, vec3 world_position) {
@@ -170,13 +245,19 @@ vec3 gnd_weather_snow_normal(vec3 world_normal, vec3 world_position) {
 	return normalize(world_normal - vec3(dx, 0.0, dz) / e);
 }
 
-// The weather on a surface: the wet and the snow on it. puddling - how much water the surface would
-// hold standing (a paving 1, a soil 0.3, a gravel 0), for a weather that draws it
+// The weather on a surface: the wet, the water standing in its hollows and the snow on it.
+// puddling - how much water the surface holds standing (a paving 1, a soil 0.3, a gravel 0)
 void gnd_weather_surface_puddled(inout vec3 surface_albedo, inout float surface_roughness, vec3 world_normal, vec3 world_position, float puddling) {
+	vec4 local = gnd_weather_local(world_position);
 	// wet: darker (the water fills the pores) and glossier
-	float wet = clamp(gnd_wetness * gnd_weather_local(world_position).g, 0.0, 1.0);
+	float wet = clamp(gnd_wetness * local.g, 0.0, 1.0);
 	surface_albedo *= mix(1.0, 0.62, wet);
 	surface_roughness = mix(surface_roughness, min(surface_roughness, 0.18), wet * 0.85);
+	// standing water: a mirror over a darker ground, ice in a frost
+	float water = gnd_weather_standing_water_at(world_normal, world_position, puddling, local);
+	float ice = gnd_weather_water_ice(local.a);
+	surface_albedo *= mix(1.0, mix(0.45, 0.8, ice), water);
+	surface_roughness = mix(surface_roughness, mix(0.02, 0.1, ice), water);
 	// soaked, it greys to a glistening slush
 	float snow = gnd_weather_snow(world_normal, world_position);
 	float slush = clamp(gnd_snow_wetness * 0.8, 0.0, 1.0);
@@ -185,10 +266,11 @@ void gnd_weather_surface_puddled(inout vec3 surface_albedo, inout float surface_
 }
 
 // Everything the weather does to a surface, each part worked out once and only where it is - for a
-// material taking its colour, roughness and normal from it (fragment() only): the wet, the snow
-// lying with its heaps in the light as near as a pixel is small enough to show them. world_normal -
-// the surface's own (world space) in, the weather's out; returns how far the snow covers the surface,
-// for its own bumps (its normal map) to go under it. puddling - as for
+// material taking its colour, roughness and normal from it (fragment() only): the wet, the water
+// standing in the hollows with its level face ringed by the rain, the snow lying with its heaps in
+// the light as near as a pixel is small enough to show them. world_normal - the surface's own
+// (world space) in, the weather's out; returns how far the snow or the water covers the surface, for
+// its own bumps (its normal map) to go under them. puddling - as for
 // gnd_weather_surface_puddled(). snow_share - how much of the snow on the open ground lies on
 // the surface: 0 none (a road cleared of it), 1 as much, more where it was heaped up (the banks a
 // plough leaves); surface_heat - how much warmer than where it stands the surface is of its own (°C,
@@ -206,6 +288,17 @@ float gnd_weather_apply_heated(inout vec3 surface_albedo, inout float surface_ro
 	float wet = clamp(gnd_wetness * local.g, 0.0, 1.0);
 	surface_albedo *= mix(1.0, 0.62, wet);
 	surface_roughness = mix(surface_roughness, min(surface_roughness, 0.18), wet * 0.85);
+
+	// the water standing in the hollows: a mirror over a darker ground, its level face ringed by the
+	// rain, ice in a frost
+	float water = gnd_weather_standing_water_at(normal, world_position, puddling, local);
+	if (water > 0.001) {
+		float ice = gnd_weather_water_ice(local.a);
+		surface_albedo *= mix(1.0, mix(0.45, 0.8, ice), water);
+		surface_roughness = mix(surface_roughness, mix(0.02, 0.1, ice), water);
+		vec2 ripples = gnd_weather_rain_ripples_at(world_position.xz, footprint) * (1.0 - ice);
+		weather_normal = normalize(mix(normal, normalize(vec3(-ripples.x, 1.0, -ripples.y)), water));
+	}
 
 	float snow = 0.0;
 	float facing_up = smoothstep(0.25, 0.75, normal.y);
@@ -233,7 +326,7 @@ float gnd_weather_apply_heated(inout vec3 surface_albedo, inout float surface_ro
 		}
 	}
 	world_normal = weather_normal;
-	return snow;
+	return max(snow, water);
 }
 
 // gnd_weather_apply_heated() with the surface as warm as where it stands

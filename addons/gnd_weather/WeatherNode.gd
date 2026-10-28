@@ -645,6 +645,8 @@ func _enter_tree() -> void:
         WeatherServer.precipitation_volumes_moved.connect(_on_precipitation_volumes_moved)
     if not WeatherServer.heat_sources_changed.is_connected(_on_heat_sources_changed):
         WeatherServer.heat_sources_changed.connect(_on_heat_sources_changed)
+    if not WeatherServer.ground_state_set.is_connected(_on_ground_state_set):
+        WeatherServer.ground_state_set.connect(_on_ground_state_set)
     # back in the tree: its probes, let go of as it left it
     if is_node_ready() and _weather_probes == null:
         _setup_weather_probes()
@@ -655,6 +657,8 @@ func _exit_tree() -> void:
         WeatherServer.precipitation_volumes_moved.disconnect(_on_precipitation_volumes_moved)
     if WeatherServer.heat_sources_changed.is_connected(_on_heat_sources_changed):
         WeatherServer.heat_sources_changed.disconnect(_on_heat_sources_changed)
+    if WeatherServer.ground_state_set.is_connected(_on_ground_state_set):
+        WeatherServer.ground_state_set.disconnect(_on_ground_state_set)
     _invalidate_precipitation_lattices()
     if _weather_probes != null:
         # the materials let go of the textures before their GPU textures go
@@ -1043,6 +1047,13 @@ func _update_weather_probes(delta: float) -> void:
 
 func _on_heat_sources_changed(world_3d: World3D) -> void:
     if world_3d == get_world_3d():
+        _weather_probes_dirty = true
+
+
+## The open ground set: the ground at the probes laid anew from it at once
+func _on_ground_state_set(world_3d: World3D) -> void:
+    if world_3d == get_world_3d() and _weather_probes != null:
+        _weather_probes.reset_ground()
         _weather_probes_dirty = true
 
 

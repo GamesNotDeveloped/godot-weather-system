@@ -12,12 +12,13 @@ fill_from = Vector2(0.5, 0.5)
 fill_to = Vector2(1, 0.5)
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_xur33"]
-size = Vector2(3, 2)
+size = Vector2(7, 5)
 
-[node name="Puddle" type="Node3D" unique_id=2032105739]
+[node name="Pond" type="Node3D" unique_id=2032105739]
 script = ExtResource("1_6b30a")
 mask_texture = SubResource("GradientTexture2D_s54oc")
 mesh = SubResource("PlaneMesh_xur33")
-surface_height_offset = 0.01
+fed_level = 1.0
+surface_height_offset = 0.0
 visibility_range_begin = 30.0
 visibility_range_end = 45.0

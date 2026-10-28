@@ -9,4 +9,5 @@ shader_parameter/base_color = Color(0.27, 0.32, 0.2, 1)
 shader_parameter/variation = 0.35
 shader_parameter/roughness_value = 0.95
 shader_parameter/snow_heaps = true
-shader_parameter/puddling = 0.35
+shader_parameter/puddling = 0.5
+shader_parameter/hollow_depth = 0.06

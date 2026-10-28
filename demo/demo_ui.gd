@@ -2,6 +2,9 @@ extends PanelContainer
 
 ## The demo's controls: the weather's inputs as sliders, and what it makes of them
 
+## How deep the ground's basin under the pond is (m)
+const POND_DEPTH := 0.6
+
 @export var weather_path: NodePath
 
 @onready var _weather: WeatherNode = get_node(weather_path)
@@ -53,6 +56,7 @@ func _ready() -> void:
     _warm_ground.falloff = 2.0
     _warm_ground.position = Vector3(-4.0, 0.5, 3.0)
     _weather.get_parent().add_child.call_deferred(_warm_ground)
+    _sink_pond_basin()
     _add_slider(box, "Warm ground °C", -20.0, 80.0, 0.5, func() -> float: return _warm_ground.temperature,
         func(v: float) -> void: _warm_ground.temperature = v)
     _add_slider(box, "Snow density", 0.1, 4.0, 0.01, func() -> float: return _weather.snow_density,
@@ -99,11 +103,13 @@ func _process(_delta: float) -> void:
         _from_temperature.set_pressed_no_signal(_weather.snow_from_temperature)
         _on_snow_from_temperature(_weather.snow_from_temperature)
     var seasons := ["winter", "spring", "summer", "autumn"]
-    _readout.text = "falling: %d%% snow, wind %.1f m/s\nground: snow %d cm, wet %d%%   season: %s" % [
+    var puddles := float(WeatherServer.get_weather_state(_weather.get_world_3d()).get("puddles", 0.0))
+    _readout.text = "falling: %d%% snow, wind %.1f m/s\nground: snow %d cm, wet %d%%, puddles %d%%   season: %s" % [
         roundi(_weather.get_falling_snow_fraction() * 100.0),
         WeatherServer.get_final_wind_speed(_weather.get_world_3d()),
         roundi(_weather.snow_depth * 100.0),
         roundi(_weather.wetness * 100.0),
+        roundi(puddles * 100.0),
         seasons[_weather.season],
     ]
 
@@ -155,3 +161,17 @@ func _add_slider(parent: Control, text: String, min_value: float, max_value: flo
     _sliders.append([slider, number, step, getter])
     parent.add_child(row)
     return row
+
+
+## The ground sunk in a basin under the pond (weather_lit's), where the pond lies and as wide as it is
+func _sink_pond_basin() -> void:
+    var pond := _weather.get_parent().get_node_or_null(^"Pond") as PuddleSurface3D
+    var ground := _weather.get_parent().get_node_or_null(^"Ground") as MeshInstance3D
+    if pond == null or ground == null or not (pond.mesh is PlaneMesh):
+        return
+    var material := ground.mesh.surface_get_material(0) as ShaderMaterial
+    var half_size := (pond.mesh as PlaneMesh).size * 0.5
+    var scale := pond.global_basis.get_scale()
+    material.set_shader_parameter(&"basin_centre", Vector2(pond.global_position.x, pond.global_position.z))
+    material.set_shader_parameter(&"basin_radii", Vector2(half_size.x * scale.x, half_size.y * scale.z))
+    material.set_shader_parameter(&"basin_depth", POND_DEPTH)

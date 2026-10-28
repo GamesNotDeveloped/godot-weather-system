@@ -5,7 +5,8 @@ class_name PuddleSurface3D
 ## A puddle: mask_texture's alpha its depth, on mesh (a plane). The weather where it lies is its
 ## shader's, from the ground's globals and the weather probes (puddle_surface.gdshader): how full it
 ## is, ice over it below freezing, snow on it, the rain's ripples as much as reaches it - nothing of it
-## worked out here, nor every frame. Its properties go to the material as they are set.
+## worked out here, nor every frame. Its properties go to the material as they are set. A pond is one
+## fed of its own (fed_level 1): full in a drought, frozen in a frost.
 
 const PUDDLE_SURFACE_SHADER := preload("res://addons/gnd_weather/puddle_surface.gdshader")
 
@@ -19,6 +20,11 @@ const PUDDLE_SURFACE_SHADER := preload("res://addons/gnd_weather/puddle_surface.
         if is_inside_tree():
             _ensure_render_resources()
             _sync_render_state()
+## How full it stays whatever the weather: a pond's 1, a puddle's 0 (as full as the ground's hollows)
+@export_range(0.0, 1.0, 0.01) var fed_level: float = 0.0:
+    set(value):
+        fed_level = value
+        _sync_render_state()
 @export_range(0.0, 0.2, 0.001) var surface_height_offset: float = 0.078:
     set(value):
         surface_height_offset = value
@@ -134,6 +140,7 @@ func _sync_render_state() -> void:
     RenderingServer.instance_set_transform(_instance_rid, render_transform)
 
     _material.set_shader_parameter("mask_texture", mask_texture)
+    _material.set_shader_parameter("fed_level", fed_level)
     _material.set_shader_parameter("rain_ripple_threshold", rain_ripple_threshold)
     _material.set_shader_parameter("puddle_alpha_cutoff", puddle_alpha_cutoff)
     _material.set_shader_parameter("visibility_range_begin", visibility_range_begin)

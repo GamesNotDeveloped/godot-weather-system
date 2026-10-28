@@ -14,6 +14,9 @@ signal precipitation_volumes_moved(world_3d: World3D)
 ## world_3d's heat sources changed (WeatherHeatSource3D, a WeatherHeatProvider): its probes are
 ## worked out again then
 signal heat_sources_changed(world_3d: World3D)
+## world_3d's ground was set (set_ground_state()): a scenario's, a jump of its snow or its water - the
+## ground at the probes is laid anew from it, not gathered over time towards it
+signal ground_state_set(world_3d: World3D)
 
 const WIND_DIRECTION_GLOBAL := &"gnd_wind_direction"
 const WIND_SPEED_GLOBAL := &"gnd_wind_speed"
@@ -36,8 +39,8 @@ const WETNESS_GLOBAL := &"gnd_wetness"
 const AIR_TEMPERATURE_GLOBAL := &"gnd_air_temperature"
 ## The rain falling on the ground (0 - 1, its share of the precipitation)
 const RAIN_GLOBAL := &"gnd_rain"
-## How full the puddles are (0 - 1, past 1 flooding): a ground model of standing water sets it, full
-## without one
+## How full the ground's hollows are of standing water (1 to the brim, up to 3 flooding over): the
+## puddles
 const PUDDLES_GLOBAL := &"gnd_puddles"
 ## The weather probes' (WeatherNode, WeatherProbes): the ground at them, their window's corner and
 ## size in the world, whether there are any
@@ -64,7 +67,7 @@ const GROUND_GLOBAL_DEFAULTS := {
     &"gnd_wetness": 0.0,
     &"gnd_air_temperature": 10.0,
     &"gnd_rain": 0.0,
-    &"gnd_puddles": 1.0,
+    &"gnd_puddles": 0.0,
     # the weather probes' (WeatherNode): the ground at them - the open ground's share of its snow, wet
     # and standing water, its temperature (WeatherProbes.ground_texture) - the window's corner and size
     # in the world, and whether there are any (0 - none: the open ground's weather everywhere)
@@ -499,6 +502,7 @@ func set_ground_state(world_3d: World3D, ground: Dictionary) -> void:
     model.set_ground(state, ground)
     _store_weather_state(world_3d, state)
     _apply_ground_globals(state, model)
+    ground_state_set.emit(world_3d)
 
 
 ## The falling snow's share comes round to the target over world_seconds
