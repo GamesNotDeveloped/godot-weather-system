@@ -56,6 +56,14 @@ varying float precipitation_open;
 varying vec3 drop_position;
 varying flat float near_shelter;
 
+// how far down its card a streak is drawn at most, of the card at streak_length_scale 1: fragment()'s
+// body ends by 0.82 of it, its blur by 1.2 times that
+const float STREAK_EXTENT = 0.85;
+// a card whose line passes nearer the eye than EYE_CLEAR (m) is not drawn, faded out up to EYE_FADE:
+// a streak brushing past the eye was tens of pixels wide, the cards the nearest the most of the screen
+const float EYE_CLEAR = 0.35;
+const float EYE_FADE = 0.8;
+
 float hash11(float p) {
 	return fract(sin(p) * 43758.5453123);
 }
@@ -87,7 +95,13 @@ void vertex() {
 	vec3 across = cross(eye_forward, down);
 	across = length(across) > 0.0001 ? normalize(across) : normalize(INV_VIEW_MATRIX[0].xyz);
 	float card_scale = mix(0.85, 1.15, variation);
-	float along = (VERTEX.y + (streak_flow - 0.5) * travel_distance) * card_scale;
+	// the card only as long as its streak is drawn: a light rain's short streaks left most of a long
+	// card's pixels to be thrown away. Its top (UV.y 0) stays, its bottom comes up with its UV
+	float drawn = clamp(STREAK_EXTENT * streak_length_scale * (glow_amount > 0.0 ? mix(1.04, 1.2, blur_amount) : 1.0), 0.05, 1.0);
+	float card_half = abs(VERTEX.y);
+	float card_y = card_half - UV.y * drawn * card_half * 2.0;
+	UV.y *= drawn;
+	float along = (card_y + (streak_flow - 0.5) * travel_distance) * card_scale;
 	float side = (VERTEX.x + sin((streak_flow + detail) * 6.28318) * mix(0.0, 0.012, detail)) * card_scale;
 	vec3 point = center + across * side + down * along;
 	// the gusts' waves are the world's, so taken where the drop is in it
@@ -105,6 +119,13 @@ void vertex() {
 	near_shelter = precipitation_near_shelter(card_top, down, half_height * 2.0, margin) ? 1.0 : 0.0;
 	VERTEX = mat3(VIEW_MATRIX) * point;
 	NORMAL = normalize(mat3(VIEW_MATRIX) * cross(across, down));
+	// how near the card's line passes the eye: the same at its four corners
+	float eye_distance = length(center - down * dot(center, down));
+	edge_fade *= smoothstep(EYE_CLEAR, EYE_FADE, eye_distance);
+	if (eye_distance < EYE_CLEAR) {
+		// all four corners at one point: no pixel of it
+		VERTEX = vec3(0.0, 0.0, -1.0);
+	}
 }
 
 void fragment() {
