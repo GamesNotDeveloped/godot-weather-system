@@ -566,6 +566,10 @@ var _snow_fall_speed: float = -1.0
 # The rain's streaks the same way, in their cycles
 var _rain_flow_offset: float = 0.0
 var _rain_flow_speed: float = -1.0
+# The air the wind carries the rain's gusts and swirls in moves TIME * the wind less this offset,
+# taken up as the wind changes so that they go on where they were; the wind it was taken for
+var _rain_wind_offset: Vector2 = Vector2.ZERO
+var _rain_wind: Vector2 = Vector2.ZERO
 var _current_snow_fraction: float = 0.0
 var _syncing_ground: bool = false
 var _season: Season = Season.SUMMER
@@ -1014,7 +1018,7 @@ func _update_weather_probes(delta: float) -> void:
     # the way it falls: the rain's and the snow's, as much of each as falls
     var snow := clampf(_current_snow_fraction, 0.0, 1.0)
     var snow_flight := get_snow_flight()
-    var fall := _get_rain_direction(_get_wind_speed(), _get_precipitation_heaviness()).lerp(
+    var fall := _get_rain_direction(_get_steady_wind_speed(), _get_precipitation_heaviness()).lerp(
         snow_flight.normalized() if snow_flight.length_squared() > 0.0001 else Vector3.DOWN, snow).normalized()
     var params := PackedFloat32Array()
     params.resize(WeatherProbes.Param.COUNT)
@@ -1451,9 +1455,10 @@ func set_ground(ground: Dictionary) -> void:
     _apply_weather_state_snapshot(WeatherServer.get_weather_state(get_world_3d()))
 
 
-## The way the rain falls now (world space, any length), the wind and its gusts slanting it
+## The way the rain falls now (world space, any length), the steady wind slanting it as the drawn
+## rain's (its gusts are the gust field's, place by place)
 func get_rain_fall_direction() -> Vector3:
-    return _get_rain_direction(_get_wind_speed(), _current_global_precipitation)
+    return _get_rain_direction(_get_steady_wind_speed(), _current_global_precipitation)
 
 
 ## The way the snow flies now (world space, m/s): the steady wind carrying it, falling at snow_fall_speed
@@ -1514,15 +1519,23 @@ func _update_precipitation_rendering() -> void:
                 mesh.clear()
 
 
+## The rain slants and drifts with the steady wind, as the snow does: its gusts are the gust field's,
+## which differs from place to place - the gusting wind's speed, the same everywhere and changing at
+## every tick, tilted the whole rain at once and, times TIME, threw its gusts and swirls metres aside
 func _update_rain_layers(camera: Camera3D, render_intensity: float, _global_intensity: float) -> void:
-    var fall_direction := _get_rain_direction(_get_wind_speed(), render_intensity)
+    var steady_speed := _get_steady_wind_speed()
+    var fall_direction := _get_rain_direction(steady_speed, render_intensity)
     var wind := _get_wind_direction()
     if wind.length_squared() > 0.0001:
-        wind = wind.normalized() * maxf(_get_wind_speed(), 0.0)
+        wind = wind.normalized() * steady_speed
+    if not wind.is_equal_approx(_rain_wind):
+        _rain_wind_offset += (wind - _rain_wind) * _get_shader_time()
+        _rain_wind = wind
     for mesh in [_rain_near, _rain_mid]:
         if mesh != null:
             mesh.set_shader_parameter(&"fall_direction", fall_direction)
             mesh.set_shader_parameter(&"wind", wind)
+            mesh.set_shader_parameter(&"wind_offset", _rain_wind_offset)
             mesh.set_shader_parameter(&"gust_strength", get_wind_gust_strength())
             mesh.set_shader_parameter(&"gust_scale", global_wind_gust_size)
             mesh.set_shader_parameter(&"turbulence", get_wind_eddy_strength())

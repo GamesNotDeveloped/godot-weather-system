@@ -1,6 +1,7 @@
 // The rain's drops (precipitation_rain.gdshader and a weather's own): included after a wind -
-// vec3 precipitation_rain_wind(vec3 world_position, vec2 wind, float gust_strength, float gust_scale,
-// float turbulence, float seed, float variation, float time), how far it shoves a drop
+// vec3 precipitation_rain_wind(vec3 world_position, vec2 wind, vec2 air_travel, float gust_strength,
+// float gust_scale, float turbulence, float seed, float variation, float time), how far it shoves a
+// drop; air_travel - how far the wind has carried the air, in metres (its gusts and swirls with it)
 // Each instance a cell of a lattice fixed in the world (PrecipitationMesh), its card wrapped round
 // in a box about the camera - nothing about the camera handed over by the CPU - standing along the
 // way the rain falls and turned to the eye. Skips the vertex transform.
@@ -34,6 +35,10 @@ uniform float card_center_height = 0.0;
 // and how far its eddies whirl a drop about, in metres: precipitation_rain_wind()'s, from the wind
 // included before this
 uniform vec2 wind = vec2(0.0);
+// how far TIME * wind is ahead of the air the wind has carried, in metres: taken up as the wind
+// changes, so that its gusts and swirls go on where they were (TIME * a new wind alone threw them
+// metres aside at every change)
+uniform vec2 wind_offset = vec2(0.0);
 uniform float gust_strength : hint_range(0.0, 20.0) = 0.0;
 uniform float gust_scale : hint_range(2.0, 200.0) = 25.0;
 uniform float turbulence : hint_range(0.0, 5.0) = 0.0;
@@ -86,8 +91,8 @@ void vertex() {
 	float side = (VERTEX.x + sin((streak_flow + detail) * 6.28318) * mix(0.0, 0.012, detail)) * card_scale;
 	vec3 point = center + across * side + down * along;
 	// the gusts' waves are the world's, so taken where the drop is in it
-	point += precipitation_rain_wind(camera + point, wind, gust_strength, gust_scale, turbulence,
-		instance_custom_data.a + cycle * 0.137, variation, TIME);
+	point += precipitation_rain_wind(camera + point, wind, wind * TIME - wind_offset, gust_strength, gust_scale,
+		turbulence, instance_custom_data.a + cycle * 0.137, variation, TIME);
 	drop_position = camera + point;
 	// the probes' at the card's corners, not every pixel of it: thinned where they let less of it
 	// through (a volume's feathered edge, a partial one)

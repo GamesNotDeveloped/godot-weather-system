@@ -1,6 +1,7 @@
 // The snowflakes (precipitation_snow.gdshader and a weather's own): included after a wind -
-// vec3 precipitation_snow_wind(vec3 position, vec2 flight, float gust_strength, float gust_scale,
-// float turbulence, float seed, float detail, float response, float time), where it carries a flake
+// vec3 precipitation_snow_wind(vec3 position, vec2 flight, vec2 air_travel, float gust_strength,
+// float gust_scale, float turbulence, float seed, float detail, float response, float time), where it
+// carries a flake; air_travel - how far the wind has carried the air, in metres
 
 // Snowflakes: each instance a cell of the precipitation field (PrecipitationMesh), drawing up to
 // flake_count of its mesh's quads (their index in UV2.x) as small soft flakes facing the camera,
@@ -83,8 +84,8 @@ void vertex() {
 		position.z += cos(sway_phase * 0.83 + variation * 3.1) * sway * mix(0.5, 1.0, detail);
 		// the gusts, the turbulence's swirls and each flake's own little loop: the wind included's
 		// - its waves are the world's, so taken where the flake is in it
-		position = precipitation_snow_wind(camera + position, flight.xz, gust_strength, gust_scale, turbulence, seed,
-			detail, response, TIME) - camera;
+		position = precipitation_snow_wind(camera + position, flight.xz, (TIME * flight - drift_offset).xz, gust_strength,
+			gust_scale, turbulence, seed, detail, response, TIME) - camera;
 		vec3 relative = mod(position - box_center + half_size, half_size * 2.0) - half_size;
 		vec3 center = box_center + relative;
 		world_position = camera + center;
