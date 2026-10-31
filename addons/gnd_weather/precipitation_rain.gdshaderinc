@@ -108,8 +108,11 @@ void vertex() {
 	float along = (card_y + (streak_flow - 0.5) * travel_distance) * card_scale;
 	float side = (VERTEX.x + sin((streak_flow + detail) * 6.28318) * mix(0.0, 0.012, detail)) * card_scale;
 	vec3 point = center + across * side + down * along;
-	// the gusts' waves are the world's, so taken where the drop is in it
-	point += precipitation_rain_wind(camera + point, wind, wind * TIME - wind_offset, gust_strength, gust_scale,
+	// the gusts' waves are the world's, so taken where the drop is in it - its streak's middle, the
+	// same for the whole card: taken at each corner, a gust or a swirl a few metres across shoved the
+	// streak's top one way and its bottom another, and the streaks writhed
+	vec3 drop_middle = center + down * ((streak_flow - 0.5) * travel_distance * card_scale);
+	point += precipitation_rain_wind(camera + drop_middle, wind, wind * TIME - wind_offset, gust_strength, gust_scale,
 		turbulence, instance_custom_data.a + cycle * 0.137, variation, TIME);
 	drop_position = camera + point;
 	// the probes' at the card's corners, not every pixel of it: thinned where they let less of it
