@@ -1,0 +1,7 @@
+[gd_resource type="ShaderMaterial" format=3 uid="uid://dvss2apcw6pq8"]
+
+[ext_resource type="Shader" uid="uid://yr4ywn6qa7o6" path="res://weather_vegetation.gdshader" id="1_ggaqh"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_ggaqh")

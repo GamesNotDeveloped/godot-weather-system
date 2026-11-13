@@ -1,0 +1,36 @@
+[gd_scene format=3]
+
+[ext_resource type="Material" path="res://materials/bark.tres" id="1_1rhkl"]
+[ext_resource type="Material" path="res://materials/needles.tres" id="2_dn6xk"]
+
+[node name="Tree" type="Node3D" unique_id=1832167095]
+
+[node name="Trunk" type="CSGCylinder3D" parent="." unique_id=849562100]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+radius = 0.18
+height = 1.8
+material = ExtResource("1_1rhkl")
+
+[node name="CrownLow" type="CSGCylinder3D" parent="." unique_id=820590552]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.1, 0)
+radius = 1.5
+height = 2.1
+sides = 10
+cone = true
+material = ExtResource("2_dn6xk")
+
+[node name="CrownMiddle" type="CSGCylinder3D" parent="." unique_id=1242991457]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.1, 0)
+radius = 1.15
+height = 2.1
+sides = 10
+cone = true
+material = ExtResource("2_dn6xk")
+
+[node name="CrownTop" type="CSGCylinder3D" parent="." unique_id=447311636]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.1, 0)
+radius = 0.8
+height = 2.1
+sides = 10
+cone = true
+material = ExtResource("2_dn6xk")

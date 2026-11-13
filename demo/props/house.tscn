@@ -1,0 +1,66 @@
+[gd_scene format=3 uid="uid://cvj1fie56jp8a"]
+
+[ext_resource type="Material" uid="uid://bqymsdu74at87" path="res://materials/plaster.tres" id="1_uqa32"]
+[ext_resource type="Material" uid="uid://cg16vch86ebq1" path="res://materials/roof_tiles.tres" id="2_m5xk7"]
+[ext_resource type="Material" uid="uid://cmkfhuyuax0lr" path="res://materials/window.tres" id="3_ar4ri"]
+[ext_resource type="Material" uid="uid://cdi2myqhgirpk" path="res://materials/door.tres" id="4_yrjot"]
+[ext_resource type="Script" uid="uid://4xov8ndpybam" path="res://addons/gnd_weather/PrecipitationVolume.gd" id="5_m5xk7"]
+
+[node name="House" type="Node3D" unique_id=588582102]
+
+[node name="Walls" type="CSGBox3D" parent="." unique_id=870349565]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.8, 0)
+size = Vector3(6, 3.6, 5)
+material = ExtResource("1_uqa32")
+
+[node name="RoofFront" type="CSGBox3D" parent="." unique_id=1127391346]
+transform = Transform3D(1, 0, 0, 0, 0.7880108, -0.6156615, 0, 0.6156615, 0.7880108, 0, 4.45, 1.32)
+size = Vector3(6.6, 0.18, 3.4)
+material = ExtResource("2_m5xk7")
+
+[node name="RoofBack" type="CSGBox3D" parent="." unique_id=1936354436]
+transform = Transform3D(1, 0, 0, 0, 0.7880108, 0.6156615, 0, -0.6156615, 0.7880108, 0, 4.45, -1.32)
+size = Vector3(6.6, 0.18, 3.4)
+material = ExtResource("2_m5xk7")
+
+[node name="Gables" type="CSGPolygon3D" parent="." unique_id=231510707]
+transform = Transform3D(-4.371139e-08, 0, -1, 0, 1, 0, 1, 0, -4.371139e-08, 2.98, 3.6, 0)
+polygon = PackedVector2Array(-2.5, 0, 2.5, 0, 0, 1.95)
+depth = 5.96
+material = ExtResource("1_uqa32")
+
+[node name="WindowLeft" type="CSGBox3D" parent="." unique_id=1613608090]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.6, 2, 2.52)
+size = Vector3(1, 1.2, 0.08)
+material = ExtResource("3_ar4ri")
+
+[node name="WindowRight" type="CSGBox3D" parent="." unique_id=1508857692]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.6, 2, 2.52)
+size = Vector3(1, 1.2, 0.08)
+material = ExtResource("3_ar4ri")
+
+[node name="Door" type="CSGBox3D" parent="." unique_id=786703129]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.05, 2.52)
+size = Vector3(1, 2.1, 0.08)
+material = ExtResource("4_yrjot")
+
+[node name="PrecipitationVolume" type="VisualInstance3D" parent="." unique_id=1508866575]
+unique_name_in_owner = false
+process_mode = 0
+process_priority = 0
+process_physics_priority = 0
+process_thread_group = 0
+physics_interpolation_mode = 0
+auto_translate_mode = 0
+editor_description = ""
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.5950384, 1.3185244, -0.037861347)
+rotation_edit_mode = 0
+rotation_order = 2
+top_level = false
+visible = true
+visibility_parent = NodePath("")
+layers = 1
+script = ExtResource("5_m5xk7")
+precipitation_delta = -10.0
+size = Vector3(6.5148563, 4.6370487, 4.7041006)
+metadata/_custom_type_script = "uid://4xov8ndpybam"
