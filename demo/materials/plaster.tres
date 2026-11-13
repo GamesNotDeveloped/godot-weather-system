@@ -1,0 +1,10 @@
+[gd_resource type="ShaderMaterial" format=3 uid="uid://bqymsdu74at87"]
+
+[ext_resource type="Shader" uid="uid://jrp1714m7m1c" path="res://weather_lit.gdshader" id="1_j6iby"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_j6iby")
+shader_parameter/base_color = Color(0.78, 0.72, 0.62, 1)
+shader_parameter/variation = 0.12
+shader_parameter/roughness_value = 0.9
