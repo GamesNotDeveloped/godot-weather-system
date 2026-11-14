@@ -3,7 +3,10 @@
 
 // The weather probes (WeatherProbes.gd): a lattice of them fixed in the world about the camera, held
 // in 3D textures addressed round in it - the probe of world cell w in texel w mod dims, so the window
-// moving over the world re-works only what came into it.
+// moving over the world re-works only what came into it. A probe stands in the middle of its cell's
+// bottom and holds the weather of what lies in its cell: a surface reads the cell it is in
+// (weather_surface.gdshaderinc's gnd_weather_probe_coordinate()) - blended between two cells, a
+// platform's top took the one under it, which the platform itself shelters.
 //
 // mode 0 - the probes: how much of the precipitation reaches each (the PrecipitationVolumes, by
 //   their delta, multiplier and feathered edge; a roof by the way the rain or the snow comes), the
@@ -13,7 +16,10 @@
 // mode 1 - the ground at each probe over time: its wet, snow and standing water, gathering as the
 //   probe lets the precipitation in, never more than the open ground's, and melting and drying faster
 //   as it is warmer than the air; kept as amounts (ground_state) and given as the open ground's share
-//   with the temperature (ground)
+//   with the surface's temperature (ground): the probe's, which the surface comes after over
+//   params[17] hours - its water freezes by it, not by the air's at once. What gathers comes down through the top of the probe's cell past
+//   the volumes and the scene's own geometry (the shelter map, PrecipitationShelterMap): what lies
+//   stays when the wind turns, and only what falls after keeps to the new shelter
 
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 
@@ -38,6 +44,10 @@ layout(set = 0, binding = 4, std430) restrict readonly buffer Volumes {
 layout(set = 0, binding = 5, std430) restrict readonly buffer HeatSources {
 	float h[];
 } heat;
+
+// the shelter map: how far along the fall the first thing the precipitation meets is, in metres
+// from its camera (a texel of nothing without one: params[29] 0)
+layout(set = 0, binding = 6) uniform sampler2D shelter_map;
 
 const int VOLUME_STRIDE = 24;
 const int HEAT_STRIDE = 20;
@@ -96,6 +106,80 @@ float box_blend(vec3 local, vec3 half_size, float feather, bool footprint) {
 	return smoothstep(0.0, 1.0, clamp(d / feather, 0.0, 1.0));
 }
 
+// How far above a probe's cell the first thing the precipitation meets has to be to shelter what lies
+// in it (m): precipitation_shelter_map.gdshaderinc's PRECIPITATION_SHELTER_SURFACE_BIAS. Whatever is
+// within the cell - a platform's top, the snow lying on the ground, a low bough - is what the
+// precipitation lands on there
+const float SHELTER_SURFACE_BIAS = 0.3;
+// How far up the probe the blockers are looked for (m along the fall): a roof higher than this
+// shelters as one this high - its shadow as soft
+const float SHELTER_SEARCH_HEIGHT = 8.0;
+// how many points a side the blockers are looked for and the shelter taken at
+const int SHELTER_TAPS = 5;
+
+// The shelter map's first hit at map point uv (0 - 1)
+float shelter_first(vec2 uv) {
+	if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+		return 1e9;
+	}
+	return textureLod(shelter_map, uv, 0.0).r;
+}
+
+// How much of the precipitation comes down into the probe's cell past the scene's own geometry, of the
+// open sky's, as a soft shadow: the flakes and the drops stray from the fall as they come down
+// (params[46]: how far aside a metre of the fall, the snow's more than the rain's), so under a roof
+// h metres up the edge is h times that wide. The blockers over the probe are looked for first, their
+// mean height giving the edge's width, then the shelter taken over the cell and the edge, at
+// SHELTER_TAPS a side: open where the first thing the precipitation meets is no higher than the cell's
+// top and SHELTER_SURFACE_BIAS. 1 out of the map or without one
+float shelter_reach(vec3 point) {
+	if (params.p[29] < 0.5) {
+		return 1.0;
+	}
+	float cell = params.p[7];
+	float bias = cell + SHELTER_SURFACE_BIAS;
+	float spread = max(params.p[46], 0.0);
+	mat4 to_map = mat4(
+		vec4(params.p[30], params.p[31], params.p[32], params.p[33]),
+		vec4(params.p[34], params.p[35], params.p[36], params.p[37]),
+		vec4(params.p[38], params.p[39], params.p[40], params.p[41]),
+		vec4(params.p[42], params.p[43], params.p[44], params.p[45]));
+	vec3 in_map = (to_map * vec4(point, 1.0)).xyz;
+	// a metre across the fall in the map's coordinates
+	float per_metre = length(vec3(to_map[0][0], to_map[1][0], to_map[2][0]));
+	float limit = in_map.z - bias;
+	// the blockers over it: their mean height above it
+	float search = (0.5 * cell + spread * SHELTER_SEARCH_HEIGHT) * per_metre;
+	float blockers = 0.0;
+	float blocked = 0.0;
+	for (int j = 0; j < SHELTER_TAPS; j++) {
+		for (int i = 0; i < SHELTER_TAPS; i++) {
+			vec2 across = (vec2(float(i), float(j)) + 0.5) / float(SHELTER_TAPS) * 2.0 - 1.0;
+			float first = shelter_first(in_map.xy + across * search);
+			if (first < limit) {
+				blockers += in_map.z - first;
+				blocked += 1.0;
+			}
+		}
+	}
+	if (blocked <= 0.0) {
+		return 1.0;
+	}
+	float height = min(blockers / blocked, SHELTER_SEARCH_HEIGHT);
+	// the shelter over the cell and the edge as wide as the precipitation strays coming down that far
+	float reach = (0.5 * cell + spread * height) * per_metre;
+	float open = 0.0;
+	for (int j = 0; j < SHELTER_TAPS; j++) {
+		for (int i = 0; i < SHELTER_TAPS; i++) {
+			vec2 across = (vec2(float(i), float(j)) + 0.5) / float(SHELTER_TAPS) * 2.0 - 1.0;
+			if (shelter_first(in_map.xy + across * reach) >= limit) {
+				open += 1.0;
+			}
+		}
+	}
+	return open / float(SHELTER_TAPS * SHELTER_TAPS);
+}
+
 // Magnus: the vapour pressure of saturated air at t (hPa)
 float saturation(float t) {
 	return 6.112 * exp(17.62 * t / (243.12 + t));
@@ -111,9 +195,12 @@ void work_probe(ivec3 texel, vec3 point) {
 	// the precipitation reaching it, of the open sky's, and the lightning's multiplier
 	float reach = 1.0;
 	float lightning = 1.0;
+	// the volumes at the cell's top: what lies in the cell is under a volume's roof only if the roof is
+	// above the cell - a roof's own top, at its box's top, gets its snow
+	vec3 top = point + vec3(0.0, params.p[7], 0.0);
 	for (int i = 0; i < volume_count; i++) {
 		int o = i * VOLUME_STRIDE;
-		vec3 local = to_local(o, false, point);
+		vec3 local = to_local(o, false, top);
 		vec3 half_size = vec3(volumes.v[o + 12], volumes.v[o + 13], volumes.v[o + 14]);
 		float feather = volumes.v[o + 15];
 		float delta = volumes.v[o + 16];
@@ -176,9 +263,9 @@ void work_probe(ivec3 texel, vec3 point) {
 	imageStore(probes, texel, vec4(reach, t, local_humidity, lightning));
 }
 
-void work_ground(ivec3 texel) {
+void work_ground(ivec3 texel, vec3 point) {
 	vec4 probe = imageLoad(probes, texel);
-	float reach = probe.r;
+	float reach = probe.r * shelter_reach(point);
 	float t = probe.g;
 	float air = params.p[15];
 	float hours = params.p[20];
@@ -191,17 +278,23 @@ void work_ground(ivec3 texel) {
 	float melt_per_degree = params.p[27];
 	float drying_mm = params.p[28];
 
+	// the water past the brim runs in under the shelters: as much of the wet and the standing water
+	// gathers as it floods, whatever reaches the cell
+	float flowing = max(reach, clamp(params.p[47], 0.0, 1.0));
 	vec4 state = imageLoad(ground_state, texel);
 	ivec3 base = ivec3(params.p[0], params.p[1], params.p[2]);
 	ivec3 old_base = ivec3(params.p[8], params.p[9], params.p[10]);
 	bool fresh = params.p[11] > 0.5 || world_cell(texel, base) != world_cell(texel, old_base);
 	if (fresh) {
 		// one come into the window: as if the weather had always been as it is
-		state = vec4(open_wet * reach, open_snow * reach, open_water * reach, 0.0);
+		state = vec4(open_wet * flowing, open_snow * reach, open_water * flowing, t);
 	} else {
-		state.x = min(state.x + rain_mm * hours / wet_film * reach, open_wet);
+		// the surface's temperature after the probe's, over params[17] hours
+		float lag = params.p[17];
+		state.w += (t - state.w) * (lag > 0.0 ? 1.0 - exp(-hours / lag) : 1.0);
+		state.x = min(state.x + rain_mm * hours / wet_film * flowing, open_wet);
 		state.y = min(state.y + snow_fall * hours * reach, open_snow);
-		state.z = min(state.z + rain_mm * hours * reach, open_water);
+		state.z = min(state.z + rain_mm * hours * flowing, open_water);
 		// warmer than the air: the snow melts by as much more, and the wet dries as much faster as the
 		// air's vapour pressure falls further short of the saturated there than on the open ground (the
 		// open ground's own drying is the ground model's: its amounts cap these)
@@ -220,7 +313,7 @@ void work_ground(ivec3 texel) {
 		open_snow > 0.0001 ? clamp(state.y / open_snow, 0.0, 1.0) : 1.0,
 		open_wet > 0.0001 ? clamp(state.x / open_wet, 0.0, 1.0) : 1.0,
 		open_water > 0.0001 ? clamp(state.z / open_water, 0.0, 1.0) : 1.0);
-	imageStore(ground, texel, vec4(share, t));
+	imageStore(ground, texel, vec4(share, state.w));
 }
 
 void main() {
@@ -231,10 +324,10 @@ void main() {
 	}
 	ivec3 base = ivec3(params.p[0], params.p[1], params.p[2]);
 	float cell = params.p[7];
-	vec3 point = (vec3(world_cell(texel, base)) + 0.5) * cell;
+	vec3 point = (vec3(world_cell(texel, base)) + vec3(0.5, 0.0, 0.5)) * cell;
 	if (params.p[3] < 0.5) {
 		work_probe(texel, point);
 	} else {
-		work_ground(texel);
+		work_ground(texel, point);
 	}
 }

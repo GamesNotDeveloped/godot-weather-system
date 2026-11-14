@@ -3,7 +3,9 @@ class_name WeatherProbes
 extends RefCounted
 
 ## The weather probes on the GPU (weather_probes.glsl): a lattice of them fixed in the world about the
-## camera, `dims` of them `cell` metres apart, held in 3D textures addressed round in it. The probes
+## camera, `dims` of them `cell` metres apart, each in the middle of its cell's bottom and holding the
+## weather of what lies in its cell (a surface reads the cell it is in), held in 3D textures addressed
+## round in it. The probes
 ## (probes_texture: how much of the precipitation reaches each, its temperature, its humidity, the
 ## lightning's multiplier) and the ground at them over time (ground_texture: the open ground's share
 ## of its snow, wet and standing water, and the temperature) are worked out by a compute shader as
@@ -19,10 +21,15 @@ enum Param {
     DIMS_X, DIMS_Y, DIMS_Z, CELL,
     OLD_BASE_X, OLD_BASE_Y, OLD_BASE_Z, RESET,
     FALL_X, FALL_Y, FALL_Z, AIR_TEMPERATURE,
-    HUMIDITY, UNUSED, VOLUME_COUNT, HEAT_COUNT,
+    HUMIDITY, GROUND_HOURS, VOLUME_COUNT, HEAT_COUNT,
     HOURS, RAIN_MM, SNOW_FALL, OPEN_WET,
     OPEN_SNOW, OPEN_WATER, WET_FILM, MELT_PER_DEGREE,
-    DRYING_MM, COUNT,
+    DRYING_MM,
+    ## the shelter map: whether there is one, the world-to-map transform's 16 floats by columns
+    ## (PrecipitationShelterMap), and how far aside the precipitation strays a metre of its fall
+    SHELTER_ENABLED, SHELTER_TRANSFORM, SHELTER_SPREAD = 46,
+    ## how far the open ground's standing water is past the brim (0 - 1): it runs in under the shelters
+    FLOOD, COUNT,
 }
 const GROUP_SIZE := 4
 
@@ -34,7 +41,7 @@ signal textures_created
 ## the lightning's multiplier (a)
 var probes_texture: Texture3DRD
 ## The open ground's share of the snow (r), the wet (g) and the standing water (b) at each probe,
-## and its temperature (a, °C)
+## and its surface's temperature (a, °C: the probe's, come after over Param.GROUND_HOURS)
 var ground_texture: Texture3DRD
 
 var _rd: RenderingDevice
@@ -49,6 +56,10 @@ var _heat := RID()
 var _volume_bytes := 0
 var _heat_bytes := 0
 var _uniform_set := RID()
+# the shelter map the uniform set was made with, a texel of nothing without one, and how it is sampled
+var _shelter := RID()
+var _no_shelter := RID()
+var _shelter_sampler := RID()
 var _dims := Vector3i.ZERO
 # the window's corner (its world cell) the textures hold, and the one they held before
 var _base := Vector3i.ZERO
@@ -97,8 +108,9 @@ func get_base() -> Vector3i:
 
 ## The probes worked out, then the ground at them over params[HOURS]: params by Param (BASE*, MODE,
 ## OLD_BASE* and RESET are set here), the volumes (VOLUME_STRIDE floats each, as they apply) and the
-## heat sources (WeatherHeatProvider.STRIDE floats each), in the world-to-their-space rows
-func update(params: PackedFloat32Array, volumes: PackedFloat32Array, heat: PackedFloat32Array) -> void:
+## heat sources (WeatherHeatProvider.STRIDE floats each), in the world-to-their-space rows; shelter -
+## the shelter map's texture on the GPU (PrecipitationShelterEffect), none without one
+func update(params: PackedFloat32Array, volumes: PackedFloat32Array, heat: PackedFloat32Array, shelter := RID()) -> void:
     params.resize(Param.COUNT)
     params[Param.BASE_X] = _base.x
     params[Param.BASE_Y] = _base.y
@@ -114,7 +126,7 @@ func update(params: PackedFloat32Array, volumes: PackedFloat32Array, heat: Packe
     params[Param.HEAT_COUNT] = heat.size() / WeatherHeatProvider.STRIDE
     _reset = false
     _old_base = _base
-    RenderingServer.call_on_render_thread(_dispatch.bind(params, volumes, heat))
+    RenderingServer.call_on_render_thread(_dispatch.bind(params, volumes, heat, shelter))
 
 
 func _create(dims: Vector3i) -> void:
@@ -127,6 +139,11 @@ func _create(dims: Vector3i) -> void:
             return
         _pipeline = _rd.compute_pipeline_create(_shader)
         _params = _rd.storage_buffer_create(Param.COUNT * 4)
+        _shelter_sampler = _rd.sampler_create(RDSamplerState.new())
+        var no_shelter := RDTextureFormat.new()
+        no_shelter.format = RenderingDevice.DATA_FORMAT_R32_SFLOAT
+        no_shelter.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT
+        _no_shelter = _rd.texture_create(no_shelter, RDTextureView.new(), [PackedFloat32Array([0.0]).to_byte_array()])
     # the new ones under the textures before the old ones go, so the materials never see none
     var old := [_probes, _ground_state, _ground]
     _probes = _create_texture(dims, RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT, true)
@@ -156,9 +173,15 @@ func _create_texture(dims: Vector3i, format: RenderingDevice.DataFormat, sampled
     return _rd.texture_create(texture_format, RDTextureView.new(), [])
 
 
-func _dispatch(params: PackedFloat32Array, volumes: PackedFloat32Array, heat: PackedFloat32Array) -> void:
+func _dispatch(params: PackedFloat32Array, volumes: PackedFloat32Array, heat: PackedFloat32Array, shelter: RID) -> void:
     if _rd == null or not _pipeline.is_valid() or not _probes.is_valid():
         return
+    if not shelter.is_valid() or not _rd.texture_is_valid(shelter):
+        shelter = _no_shelter
+        params[Param.SHELTER_ENABLED] = 0.0
+    if shelter != _shelter:
+        _shelter = shelter
+        _uniform_set = RID()
     # a buffer never empty, grown as it has to be (the uniform set made again with it)
     var volume_bytes := maxi(volumes.size(), VOLUME_STRIDE) * 4
     if volume_bytes > _volume_bytes:
@@ -178,6 +201,7 @@ func _dispatch(params: PackedFloat32Array, volumes: PackedFloat32Array, heat: Pa
         _uniform_set = _rd.uniform_set_create([
             _image_uniform(0, _probes), _image_uniform(1, _ground_state), _image_uniform(2, _ground),
             _buffer_uniform(3, _params), _buffer_uniform(4, _volumes), _buffer_uniform(5, _heat),
+            _sampler_uniform(6, _shelter),
         ], _shader, 0)
     if not volumes.is_empty():
         _rd.buffer_update(_volumes, 0, volumes.size() * 4, volumes.to_byte_array())
@@ -199,6 +223,15 @@ func _image_uniform(binding: int, texture: RID) -> RDUniform:
     var uniform := RDUniform.new()
     uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
     uniform.binding = binding
+    uniform.add_id(texture)
+    return uniform
+
+
+func _sampler_uniform(binding: int, texture: RID) -> RDUniform:
+    var uniform := RDUniform.new()
+    uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+    uniform.binding = binding
+    uniform.add_id(_shelter_sampler)
     uniform.add_id(texture)
     return uniform
 
@@ -225,9 +258,12 @@ func _free_all() -> void:
     if _rd == null:
         return
     _free_textures()
-    for rid in [_volumes, _heat, _params, _shader]:
+    for rid in [_volumes, _heat, _params, _no_shelter, _shelter_sampler, _shader]:
         if rid.is_valid():
             _rd.free_rid(rid)
+    _no_shelter = RID()
+    _shelter_sampler = RID()
+    _shelter = RID()
     _volumes = RID()
     _heat = RID()
     _params = RID()

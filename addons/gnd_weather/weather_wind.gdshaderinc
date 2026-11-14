@@ -2,9 +2,13 @@
 // this. The globals are WeatherServer's, set by the WeatherNode (the plugin registers them). A
 // weather of more - gusts sweeping across the scene, eddies - brings shaders of its own.
 #ifdef GND_WIND_GLOBALS
+// (weather_surface.gdshaderinc has these two as well, for the water's wavelets)
+#ifndef GND_WIND_SPEED_DECLARED
+#define GND_WIND_SPEED_DECLARED
 global uniform vec2 gnd_wind_direction;
 // metres a second, its gusts and lulls over time included
 global uniform float gnd_wind_speed;
+#endif
 // how hard the vegetation sways in it (a factor for its shaders)
 global uniform float gnd_wind_strength;
 global uniform float gnd_wind_turbulence;

@@ -19,6 +19,7 @@ script = ExtResource("1_6b30a")
 mask_texture = SubResource("GradientTexture2D_s54oc")
 mesh = SubResource("PlaneMesh_xur33")
 fed_level = 1.0
+flood_rise = 0.13
 surface_height_offset = 0.0
 visibility_range_begin = 30.0
 visibility_range_end = 45.0

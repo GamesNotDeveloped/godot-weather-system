@@ -67,6 +67,13 @@ const THUNDER_AUDIBLE_KM := 20.0
 const SOUND_SPEED_KM_PER_SECOND := 0.343
 # Must match MAX_EXCLUSIONS in the precipitation shaders.
 const MAX_PRECIPITATION_EXCLUSION_VOLUMES := 16
+const SHELTER_MAP_NAME := "ShelterMap"
+## How far aside the rain and the snow stray a metre of their fall (the flakes sway and whirl, the
+## drops splash): a shelter's edge on the ground is its height times this wide
+const RAIN_SHELTER_SPREAD := 0.05
+const SNOW_SHELTER_SPREAD := 0.2
+## Every render layer there is (the engine's 20)
+const ALL_RENDER_LAYERS := 0xFFFFF
 
 ## Takes the WeatherSettings project settings (gnd_weather/*) over this node's own values on ready.
 @export var apply_project_settings: bool = false
@@ -266,8 +273,10 @@ enum TemperatureUnit { CELSIUS, FAHRENHEIT }
 @export_group("Weather probes", "weather_probe")
 ## How far apart the weather probes are, in metres: a lattice of them fixed in the world about the
 ## camera (WeatherProbes), how much of the precipitation reaches each, its temperature and humidity,
-## and the ground at it over time - a few metres is enough, the materials blend between them
-@export_range(0.5, 16.0, 0.1, "suffix:m") var weather_probe_cell: float = 2.0:
+## and the ground at it over time. A surface reads the probe of the cell it is in, the materials blend
+## between them across: a tree or a canopy shelters what is more than a cell and 0.3 m under it, and
+## the patch it keeps dry is as sharp as the cells are small
+@export_range(0.5, 16.0, 0.1, "suffix:m") var weather_probe_cell: float = 1.0:
     set(value):
         weather_probe_cell = maxf(value, 0.5)
         if is_inside_tree():
@@ -282,6 +291,43 @@ enum TemperatureUnit { CELSIUS, FAHRENHEIT }
 ## How often the probes are worked out (seconds of the game's time) - at once as a heat source or a
 ## volume changes or the camera leaves their middle
 @export_range(0.1, 10.0, 0.1, "suffix:s") var weather_probe_seconds: float = 0.5
+@export_group("Shelter map", "shelter_map")
+## Whether the scene's own geometry shelters from the precipitation (PrecipitationShelterMap): a map
+## of it rendered about the camera along the fall - the drops and the flakes under a roof not drawn,
+## and the snow, the wet and the standing water gathering on what is under it only as the precipitation
+## reaches it (the probes' ground). An extra render of the scene about the camera; without it only the
+## PrecipitationVolumes shelter
+@export var shelter_map_enabled: bool = true:
+    set(value):
+        shelter_map_enabled = value
+        if is_inside_tree():
+            _setup_shelter_map()
+## How wide the shelter map is, in metres, the camera in its middle: beyond, only the volumes shelter
+@export_range(16.0, 512.0, 1.0, "suffix:m") var shelter_map_extent: float = 96.0:
+    set(value):
+        shelter_map_extent = maxf(value, 16.0)
+        if _shelter_map != null:
+            _shelter_map.set_extent(shelter_map_extent)
+## How many texels a side it has: its extent over this is the least a roof's edge is off by
+@export_range(128, 4096, 1, "suffix:px") var shelter_map_resolution: int = 1024:
+    set(value):
+        shelter_map_resolution = clampi(value, 128, 4096)
+        if _shelter_map != null:
+            _shelter_map.set_resolution(shelter_map_resolution)
+## The render layers that shelter. Leave the directional lights' layers out: the engine renders a
+## light's shadows for every camera that sees its layer, the map's too - a second shadow pass
+@export_flags_3d_render var shelter_map_cull_mask: int = ALL_RENDER_LAYERS:
+    set(value):
+        shelter_map_cull_mask = value
+        if _shelter_map != null:
+            _shelter_map.set_cull_mask(shelter_map_cull_mask)
+## How many frames apart the map is rendered at the most for what moves under it (a train): at once as
+## the camera moves by a texel or the fall turns
+@export_range(1, 60, 1) var shelter_map_refresh_frames: int = 4:
+    set(value):
+        shelter_map_refresh_frames = maxi(value, 1)
+        if _shelter_map != null:
+            _shelter_map.set_refresh_frames(shelter_map_refresh_frames)
 @export_group("Precipitation")
 @export_group("Rain")
 ## How fast the rain falls
@@ -422,6 +468,18 @@ enum TemperatureUnit { CELSIUS, FAHRENHEIT }
         wetness = clampf(value, 0.0, 1.0)
         if not _syncing_ground:
             _push_ground_state({"wetness": wetness})
+## From how far off the camera the wet's sheen and the standing water fade out on the materials, in
+## metres: beyond water_reflections_fade_end the wet is as rough as the screen-space reflections skip
+## and no water stands - further, more of the screen reflects, and they cost every pixel of it
+@export_range(0.0, 1000.0, 1.0, "suffix:m") var water_reflections_fade_start: float = 30.0:
+    set(value):
+        water_reflections_fade_start = maxf(value, 0.0)
+        _push_water_reflections_fade()
+## How far off the camera the wet's sheen and the standing water are gone, in metres
+@export_range(1.0, 1000.0, 1.0, "suffix:m") var water_reflections_fade_end: float = 55.0:
+    set(value):
+        water_reflections_fade_end = maxf(value, 1.0)
+        _push_water_reflections_fade()
 ## Whether the snow lies on the ground: off, it falls and none of it lies, and what lay is gone - a
 ## scene that wants the snowfall without its cover
 @export var snow_cover_enabled: bool = true:
@@ -453,6 +511,13 @@ enum TemperatureUnit { CELSIUS, FAHRENHEIT }
 @export_range(0.0, 5.0, 0.01, "suffix:mm/h") var drying_mm_per_hour: float = 0.3:
     set(value):
         drying_mm_per_hour = maxf(value, 0.0)
+        _weather_input_changed()
+## How many world hours the ground's surface - the soil, the paving, the water standing on it - takes
+## to come most of the way (1 - 1/e) to the air's temperature: its water freezes and thaws by it, not
+## by the air's at once
+@export_range(0.0, 48.0, 0.1, "suffix:h") var ground_temperature_hours: float = 3.0:
+    set(value):
+        ground_temperature_hours = maxf(value, 0.0)
         _weather_input_changed()
 ## How humid the air is (0 - 1): the drier, the faster the ground dries - drying_mm_per_hour is
 ## at 0.7, a mild day's; a saturated air dries nothing
@@ -553,11 +618,20 @@ var _skydome_wind: Vector3 = Vector3(INF, INF, INF)
 # whether they must be at once
 var _weather_probes: WeatherProbes
 var _weather_probes_elapsed: float = INF
+# the world's hours since the probes were last worked out, tick by tick at each tick's time scale: the
+# elapsed seconds times the time scale now gave the probes nothing of a fast stretch slowed down at its
+# end, and their ground fell behind the open ground's
+var _weather_probes_hours: float = 0.0
 var _weather_probes_dirty: bool = true
 # the probes' textures stand on the GPU and are the materials' (WeatherProbes.textures_created)
 var _weather_probes_created: bool = false
 # whether the materials read the probes (gnd_weather_probes_enabled, weather_probes_enabled)
 var _weather_probes_shown: bool = false
+var _shelter_map: PrecipitationShelterMap
+# the shelter map's world-to-map transform as it was last rendered, for the probes' ground; whether
+# it is read
+var _shelter_world_to_map := Projection.IDENTITY
+var _shelter_shown := false
 # The flakes fall TIME * their speed less this offset, taken up as the speed changes so that none
 # moves: TIME * the new speed alone moved every flake by the whole time it had snowed, up into the
 # sky as a sleet turned to snow. The speed it was taken for, -1 none yet
@@ -635,8 +709,12 @@ func _ready() -> void:
         ground["snow_cover"] = snow_cover
     _push_ground_state(ground)
     _push_precipitation_volume_reach()
+    # the shelter map's globals there before the precipitation's materials read them
+    WeatherServer.set_ground_global(WeatherServer.SHELTER_ENABLED_GLOBAL, 0.0)
+    _push_water_reflections_fade()
     _ensure_precipitation_field_nodes()
     _setup_weather_probes()
+    _setup_shelter_map()
     _apply_weather_state(true)
     _weather_tick = Timer.new()
     _weather_tick.wait_time = WEATHER_TICK_SECONDS
@@ -711,6 +789,8 @@ func _on_weather_tick() -> void:
     WeatherServer.get_ground_model(get_world_3d()).process(self, delta)
     _push_weather_state()
     _update_weather_probes(delta)
+    if _shelter_map != null:
+        _shelter_map.set_view(_get_follow_target(), get_precipitation_fall_direction())
 
 
 func set_precipitation_intensity(value: float) -> void:
@@ -941,6 +1021,8 @@ func _setup_weather_probes() -> void:
     _weather_probes.setup(_get_weather_probe_dims())
     _weather_probes_dirty = true
     _weather_probes_elapsed = INF
+    # laid anew as if the weather had always been as it is: no hours behind them
+    _weather_probes_hours = 0.0
     _place_weather_probes(true)
 
 
@@ -969,7 +1051,7 @@ func get_weather_probe_positions(step: int = 1) -> PackedVector3Array:
     for x in range(0, dims.x, step):
         for y in range(0, dims.y, step):
             for z in range(0, dims.z, step):
-                positions.append((Vector3(base + Vector3i(x, y, z)) + Vector3.ONE * 0.5) * weather_probe_cell)
+                positions.append((Vector3(base + Vector3i(x, y, z)) + Vector3(0.5, 0.0, 0.5)) * weather_probe_cell)
     return positions
 
 
@@ -1005,6 +1087,7 @@ func _update_weather_probes(delta: float) -> void:
     if _weather_probes == null:
         return
     _weather_probes_elapsed += delta
+    _weather_probes_hours += delta * weather_time_scale / WeatherServer.SECONDS_PER_HOUR
     var moved := _place_weather_probes()
     if not moved and not _weather_probes_dirty and _weather_probes_elapsed < weather_probe_seconds:
         return
@@ -1015,11 +1098,7 @@ func _update_weather_probes(delta: float) -> void:
     var origin := Vector3(_weather_probes.get_base()) * weather_probe_cell
     var region := AABB(origin, Vector3(dims) * weather_probe_cell)
     var air := get_air_temperature_celsius()
-    # the way it falls: the rain's and the snow's, as much of each as falls
-    var snow := clampf(_current_snow_fraction, 0.0, 1.0)
-    var snow_flight := get_snow_flight()
-    var fall := _get_rain_direction(_get_steady_wind_speed(), _get_precipitation_heaviness()).lerp(
-        snow_flight.normalized() if snow_flight.length_squared() > 0.0001 else Vector3.DOWN, snow).normalized()
+    var fall := get_precipitation_fall_direction()
     var params := PackedFloat32Array()
     params.resize(WeatherProbes.Param.COUNT)
     params[WeatherProbes.Param.CELL] = weather_probe_cell
@@ -1028,8 +1107,7 @@ func _update_weather_probes(delta: float) -> void:
     params[WeatherProbes.Param.FALL_Z] = fall.z
     params[WeatherProbes.Param.AIR_TEMPERATURE] = air
     params[WeatherProbes.Param.HUMIDITY] = clampf(air_humidity, 0.0, 1.0)
-    params[WeatherProbes.Param.HOURS] = (0.0 if is_inf(_weather_probes_elapsed) else _weather_probes_elapsed) \
-            * weather_time_scale / WeatherServer.SECONDS_PER_HOUR
+    params[WeatherProbes.Param.HOURS] = _weather_probes_hours
     params[WeatherProbes.Param.RAIN_MM] = float(rates.get("rain_mm", 0.0))
     params[WeatherProbes.Param.SNOW_FALL] = float(rates.get("snow_fall", 0.0))
     params[WeatherProbes.Param.OPEN_WET] = float(rates.get("wet", 0.0))
@@ -1038,8 +1116,20 @@ func _update_weather_probes(delta: float) -> void:
     params[WeatherProbes.Param.WET_FILM] = WeatherServer.WET_FILM_MM
     params[WeatherProbes.Param.MELT_PER_DEGREE] = float(rates.get("melt_per_degree", 0.0))
     params[WeatherProbes.Param.DRYING_MM] = float(rates.get("drying_mm", 0.0))
+    params[WeatherProbes.Param.GROUND_HOURS] = float(rates.get("ground_temperature_hours", 0.0))
+    params[WeatherProbes.Param.FLOOD] = float(rates.get("flood", 0.0))
+    # what gathers on the ground under the scene's own geometry: the shelter map's
+    var shelter := RID()
+    if _shelter_shown and _shelter_map != null and _shelter_map.get_texture() != null:
+        shelter = (_shelter_map.get_texture() as Texture2DRD).texture_rd_rid
+        params[WeatherProbes.Param.SHELTER_ENABLED] = 1.0
+        params[WeatherProbes.Param.SHELTER_SPREAD] = lerpf(RAIN_SHELTER_SPREAD, SNOW_SHELTER_SPREAD,
+            clampf(_current_snow_fraction, 0.0, 1.0))
+        for column in 4:
+            for row in 4:
+                params[WeatherProbes.Param.SHELTER_TRANSFORM + column * 4 + row] = _shelter_world_to_map[column][row]
     _weather_probes.update(params, WeatherServer.get_precipitation_volumes_packed(world_3d, region),
-        WeatherServer.get_heat_sources(world_3d, region))
+        WeatherServer.get_heat_sources(world_3d, region), shelter)
     # the materials read them once they have the textures and the probes in them
     if _weather_probes_created != _weather_probes_shown:
         _weather_probes_shown = _weather_probes_created
@@ -1047,7 +1137,58 @@ func _update_weather_probes(delta: float) -> void:
         for mesh in _get_precipitation_meshes():
             mesh.set_shader_parameter(&"weather_probes_enabled", _weather_probes_shown)
     _weather_probes_elapsed = 0.0
+    _weather_probes_hours = 0.0
     _weather_probes_dirty = false
+
+
+## The shelter map made as shelter_map_enabled is set (none without a RenderingDevice), let go of as it
+## is cleared: the materials' globals with it
+func _setup_shelter_map() -> void:
+    if not shelter_map_enabled or not PrecipitationShelterMap.is_supported():
+        if _shelter_map != null:
+            # its leaving the tree lets the materials go of the map
+            remove_child(_shelter_map)
+            _shelter_map.queue_free()
+            _shelter_map = null
+        WeatherServer.set_ground_global(WeatherServer.SHELTER_ENABLED_GLOBAL, 0.0)
+        return
+    if _shelter_map != null:
+        return
+    _shelter_map = PrecipitationShelterMap.new()
+    _shelter_map.name = SHELTER_MAP_NAME
+    _shelter_map.set_extent(shelter_map_extent)
+    _shelter_map.set_resolution(shelter_map_resolution)
+    _shelter_map.set_cull_mask(shelter_map_cull_mask)
+    _shelter_map.set_refresh_frames(shelter_map_refresh_frames)
+    _shelter_map.set_view(_get_follow_target(), get_precipitation_fall_direction())
+    _shelter_map.rendered.connect(_on_shelter_map_rendered)
+    _shelter_map.hidden.connect(_on_shelter_map_hidden)
+    add_child(_shelter_map, false, Node.INTERNAL_MODE_BACK)
+
+
+## The shelter map rendered: the precipitation's materials take it as their own (the ground's globals
+## are named as the project names them, the precipitation's shaders are the plugin's)
+func _on_shelter_map_rendered(world_to_map: Projection) -> void:
+    _shelter_world_to_map = world_to_map
+    _shelter_shown = true
+    var texture := _shelter_map.get_texture() if _shelter_map != null else null
+    for mesh in _get_precipitation_meshes():
+        mesh.set_shader_parameter(&"shelter_map", texture)
+        mesh.set_shader_parameter(&"shelter_transform", world_to_map)
+        mesh.set_shader_parameter(&"shelter_enabled", texture != null)
+
+
+## The shelter map no longer read: the precipitation's materials let go of it before its texture goes
+func _on_shelter_map_hidden() -> void:
+    _shelter_shown = false
+    for mesh in _get_precipitation_meshes():
+        mesh.set_shader_parameter(&"shelter_enabled", false)
+        mesh.set_shader_parameter(&"shelter_map", null)
+
+
+## The shelter map (null without one)
+func get_shelter_map() -> PrecipitationShelterMap:
+    return _shelter_map
 
 
 func _on_heat_sources_changed(world_3d: World3D) -> void:
@@ -1081,6 +1222,7 @@ func _push_weather_server_settings() -> void:
         "snow_melt_rate": snow_melt_rate,
         "rain_mm_per_hour": rain_mm_per_hour,
         "drying_mm_per_hour": drying_mm_per_hour,
+        "ground_temperature_hours": ground_temperature_hours,
         "air_humidity": air_humidity,
         "cloud_density": cloud_density,
         "cloud_overcast_intensity": cloud_overcast_intensity,
@@ -1478,6 +1620,15 @@ func get_rain_fall_direction() -> Vector3:
     return _get_rain_direction(_get_steady_wind_speed(), _current_global_precipitation)
 
 
+## The way the precipitation falls now (world space, unit): the rain's and the snow's, as much of each
+## as falls - what a roof shelters, for the probes and the shelter map
+func get_precipitation_fall_direction() -> Vector3:
+    var snow := clampf(_current_snow_fraction, 0.0, 1.0)
+    var snow_flight := get_snow_flight()
+    return _get_rain_direction(_get_steady_wind_speed(), _get_precipitation_heaviness()).lerp(
+        snow_flight.normalized() if snow_flight.length_squared() > 0.0001 else Vector3.DOWN, snow).normalized()
+
+
 ## The way the snow flies now (world space, m/s): the steady wind carrying it, falling at snow_fall_speed
 func get_snow_flight() -> Vector3:
     var flight := _get_wind_direction() * _get_steady_wind_speed() * snow_wind_drift
@@ -1500,6 +1651,16 @@ func _update_follow_position() -> void:
         return
 
     global_position = follow_target.global_position + Vector3(0.0, follow_height, 0.0)
+    # the materials' distance off it (the wet's and the water's fade): a tick behind at the most, metres
+    # in a fade tens of metres wide
+    WeatherServer.set_ground_global(WeatherServer.CAMERA_POSITION_GLOBAL, follow_target.global_position)
+
+
+## Where the wet's sheen and the standing water fade out, for the materials: the end past the start
+func _push_water_reflections_fade() -> void:
+    if is_inside_tree():
+        WeatherServer.set_ground_global(WeatherServer.REFLECTIONS_FADE_GLOBAL,
+            Vector2(water_reflections_fade_start, maxf(water_reflections_fade_end, water_reflections_fade_start + 0.1)))
 
 
 func _update_precipitation_rendering() -> void:

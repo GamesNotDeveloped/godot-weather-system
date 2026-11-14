@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://bm7b6o0q3ugx5"
+path="res://.godot/imported/precipitation_shelter.glsl-2d8d891edf949de7eec48caabe23fab7.res"
+
+[deps]
+
+source_file="res://addons/gnd_weather/precipitation_shelter.glsl"
+dest_files=["res://.godot/imported/precipitation_shelter.glsl-2d8d891edf949de7eec48caabe23fab7.res"]
+
+[params]
+

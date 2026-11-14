@@ -1,17 +1,17 @@
 [gd_scene format=3 uid="uid://cygtkwbmhfr0k"]
 
-[ext_resource type="Material" path="res://materials/ground.tres" id="1_mcdut"]
-[ext_resource type="Material" path="res://materials/ballast.tres" id="2_2jwgm"]
-[ext_resource type="Material" path="res://materials/sleeper.tres" id="3_pxwbs"]
-[ext_resource type="Material" path="res://materials/rail.tres" id="4_krmnu"]
+[ext_resource type="Material" uid="uid://dds2grhtscw5i" path="res://materials/ground.tres" id="1_mcdut"]
+[ext_resource type="Material" uid="uid://cbtsu04sqjrnh" path="res://materials/ballast.tres" id="2_2jwgm"]
+[ext_resource type="Material" uid="uid://b1cu3qlfdl0x4" path="res://materials/sleeper.tres" id="3_pxwbs"]
+[ext_resource type="Material" uid="uid://dg7uh8t3muhsb" path="res://materials/rail.tres" id="4_krmnu"]
 [ext_resource type="PackedScene" path="res://props/platform.tscn" id="5_g6u38"]
-[ext_resource type="PackedScene" path="res://props/house.tscn" id="6_t62nm"]
+[ext_resource type="PackedScene" uid="uid://cvj1fie56jp8a" path="res://props/house.tscn" id="6_t62nm"]
 [ext_resource type="PackedScene" path="res://props/tree.tscn" id="7_aqh7y"]
 [ext_resource type="PackedScene" path="res://props/pond.tscn" id="8_8nmif"]
 [ext_resource type="ArrayMesh" path="res://props/forest_tree_mesh.res" id="9_mcdut"]
-[ext_resource type="Script" path="res://addons/free_look_camera/free_look_camera.gd" id="10_o0f5x"]
-[ext_resource type="Script" path="res://addons/gnd_weather/WeatherNode.gd" id="11_jvwcr"]
-[ext_resource type="Script" path="res://demo_ui.gd" id="12_afebi"]
+[ext_resource type="Script" uid="uid://bithv0fi1j6on" path="res://addons/free_look_camera/free_look_camera.gd" id="10_o0f5x"]
+[ext_resource type="Script" uid="uid://lgnwh1qwjbmt" path="res://addons/gnd_weather/WeatherNode.gd" id="11_jvwcr"]
+[ext_resource type="Script" uid="uid://bhnxfiox187qd" path="res://demo_ui.gd" id="12_afebi"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_d7u64"]
 sky_top_color = Color(0.32, 0.42, 0.56, 1)
@@ -27,13 +27,13 @@ background_mode = 2
 sky = SubResource("Sky_xl7dv")
 ambient_light_source = 3
 tonemap_mode = 4
-ssao_enabled = true
 ssr_enabled = true
+ssao_enabled = true
 glow_enabled = true
 glow_intensity = 0.4
 fog_enabled = true
 fog_light_color = Color(0.62, 0.66, 0.7, 1)
-fog_density = 0.006
+fog_density = 0.01225
 fog_sky_affect = 0.3
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_mcdut"]
@@ -65,6 +65,7 @@ environment = SubResource("Environment_fyea7")
 
 [node name="Sun" type="DirectionalLight3D" parent="." unique_id=1408028071]
 transform = Transform3D(0.8480481, 0.32625088, -0.4175821, 0, 0.7880108, 0.6156615, 0.52991927, -0.5221106, 0.668271, 0, 0, 0)
+layers = 2
 light_color = Color(1, 0.96, 0.9, 1)
 light_energy = 1.1
 shadow_enabled = true
@@ -74,17 +75,19 @@ directional_shadow_max_distance = 80.0
 mesh = SubResource("PlaneMesh_mcdut")
 
 [node name="Weather" type="Node3D" parent="." unique_id=478909986]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.682942, 9.417702, 3.0806046)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.72682166, 8.795043, -0.34877324)
 script = ExtResource("11_jvwcr")
+apply_project_settings = true
 precipitation_intensity = 0.5
 snow_from_temperature = true
 air_temperature = 6.0
 global_wind_direction = Vector2(1, 0)
 global_wind_speed = 1.5
+shelter_map_cull_mask = 1048573
 latitude = 50.06
 date_month = 11
 date_day = 15
-wetness = 0.00503337666666664
+wetness = 0.09079726555555527
 
 [node name="Track" type="Node3D" parent="." unique_id=394368338]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 0, 0)

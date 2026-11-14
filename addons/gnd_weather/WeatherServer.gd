@@ -37,8 +37,13 @@ const SNOW_DEPTH_GLOBAL := &"gnd_snow_depth"
 const SNOW_WETNESS_GLOBAL := &"gnd_snow_wetness"
 const WETNESS_GLOBAL := &"gnd_wetness"
 const AIR_TEMPERATURE_GLOBAL := &"gnd_air_temperature"
+## The ground's surface's temperature (°C): the air's, over hours (WeatherSimpleGround) - its water
+## freezes by it
+const GROUND_TEMPERATURE_GLOBAL := &"gnd_ground_temperature"
 ## The rain falling on the ground (0 - 1, its share of the precipitation)
 const RAIN_GLOBAL := &"gnd_rain"
+## The snow falling (0 - 1, its share of the precipitation): its flakes melting into the water
+const SNOWFALL_GLOBAL := &"gnd_snowfall"
 ## How full the ground's hollows are of standing water (1 to the brim, up to 3 flooding over): the
 ## puddles
 const PUDDLES_GLOBAL := &"gnd_puddles"
@@ -51,6 +56,17 @@ const WEATHER_PROBES_GLOBAL := &"gnd_weather_probes"
 const WEATHER_PROBE_ORIGIN_GLOBAL := &"gnd_weather_probe_origin"
 const WEATHER_PROBE_SIZE_GLOBAL := &"gnd_weather_probe_size"
 const WEATHER_PROBES_ENABLED_GLOBAL := &"gnd_weather_probes_enabled"
+## The shelter map (PrecipitationShelterMap): how far along the fall the first thing the precipitation
+## meets is, the world-to-map transform (x, y - the texel's coordinates, z - how far along the fall),
+## and whether there is one (precipitation_shelter.gdshaderinc)
+const SHELTER_MAP_GLOBAL := &"gnd_weather_shelter_map"
+const SHELTER_TRANSFORM_GLOBAL := &"gnd_weather_shelter_transform"
+const SHELTER_ENABLED_GLOBAL := &"gnd_weather_shelter_enabled"
+## Where the wet's sheen and the standing water fade out on the materials: from x to y metres off the
+## camera (WeatherNode.water_reflections_fade_start, _end; weather_surface.gdshaderinc's
+## gnd_weather_reflections_near()), and where the camera is
+const REFLECTIONS_FADE_GLOBAL := &"gnd_weather_reflections_fade"
+const CAMERA_POSITION_GLOBAL := &"gnd_weather_camera_position"
 ## Which of the weather there is on the surfaces, as much as their shaders draw - the wet, the snow
 ## lying, the water standing in the hollows, the rain falling - and whether any of it lies there:
 ## the ground model's (WeatherSimpleGround.get_globals()), told once here, so the materials branch on
@@ -75,7 +91,9 @@ const GROUND_GLOBAL_DEFAULTS := {
     &"gnd_snow_wetness": 0.0,
     &"gnd_wetness": 0.0,
     &"gnd_air_temperature": 10.0,
+    &"gnd_ground_temperature": 10.0,
     &"gnd_rain": 0.0,
+    &"gnd_snowfall": 0.0,
     &"gnd_puddles": 0.0,
     # the weather probes' (WeatherNode): the ground at them - the open ground's share of its snow, wet
     # and standing water, its temperature (WeatherProbes.ground_texture) - the window's corner and size
@@ -85,6 +103,14 @@ const GROUND_GLOBAL_DEFAULTS := {
     &"gnd_weather_probe_origin": Vector3.ZERO,
     &"gnd_weather_probe_size": Vector3.ONE,
     &"gnd_weather_probes_enabled": 0.0,
+    # the shelter map (PrecipitationShelterMap): the map, its world-to-map transform, and whether there
+    # is one (0 - none: nothing sheltered by it)
+    &"gnd_weather_shelter_map": null,
+    &"gnd_weather_shelter_transform": Projection.IDENTITY,
+    &"gnd_weather_shelter_enabled": 0.0,
+    # where the wet's sheen and the standing water fade out (m off the camera), and where it is
+    &"gnd_weather_reflections_fade": Vector2(30.0, 55.0),
+    &"gnd_weather_camera_position": Vector3.ZERO,
     &"gnd_weather_wet_exists": false,
     &"gnd_weather_snow_exists": false,
     &"gnd_weather_puddles_exist": false,
@@ -95,6 +121,7 @@ const GROUND_GLOBAL_DEFAULTS := {
 const GROUND_GLOBAL_TYPES := {
     &"gnd_weather_ground": ["sampler3D", RenderingServer.GLOBAL_VAR_TYPE_SAMPLER3D],
     &"gnd_weather_probes": ["sampler3D", RenderingServer.GLOBAL_VAR_TYPE_SAMPLER3D],
+    &"gnd_weather_shelter_map": ["sampler2D", RenderingServer.GLOBAL_VAR_TYPE_SAMPLER2D],
 }
 ## The snow's depth at which it covers the ground, in metres: below it the ground shows through
 ## in patches (weather_surface.gdshaderinc has the same)

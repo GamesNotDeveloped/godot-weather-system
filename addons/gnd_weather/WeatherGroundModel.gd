@@ -43,8 +43,10 @@ func process(_weather: WeatherNode, _delta: float) -> void:
 ## What the weather probes need of the ground now (WeatherProbes), by its own reckoning: "rain_mm" -
 ## the rain falling (mm an hour), "snow_fall" - the snow settling (m an hour), "melt_per_degree" - how
 ## deep a degree of warmth melts its snow (m an hour), "drying_mm" - the water it dries off (mm an
-## hour), and the open ground's "wet" (0 - 1), "snow" (m) and "water" (standing, mm); a model without
-## one leaves it out (none of it then)
+## hour), the open ground's "wet" (0 - 1), "snow" (m) and "water" (standing, mm), and
+## "ground_temperature_hours" - how long the ground's surface takes to come after the temperature
+## (none: at once), and "flood" - how far its standing water is past the brim (0 - 1), running in
+## under the shelters; a model without one leaves it out (none of it then)
 func get_probe_rates(_state: Dictionary) -> Dictionary:
     return {}
 

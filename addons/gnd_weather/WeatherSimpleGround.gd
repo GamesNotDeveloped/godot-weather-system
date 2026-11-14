@@ -2,9 +2,11 @@ class_name WeatherSimpleGround
 extends WeatherGroundModel
 
 ## The ground as gnd-weather has it of its own: the snow lying deeper and deeper below freezing and
-## melting above it, the surfaces wetted by the rain and the melt, drying the faster the warmer and
-## the drier the air, and the water past wetting them running off into the hollows - the puddles -
-## soaking away and drying. A model of more (drifts, the walls' snow, ice) extends this one.
+## melting above it - none lying on a ground still warm - the surfaces wetted by the rain and the
+## melt, drying the faster the warmer and the drier the air, and the water past wetting them running
+## off into the hollows - the puddles - soaking away and drying. The ground's surface - the soil, the paving, the water standing on it -
+## warms and cools after the air over hours (ground_temperature_hours): its water freezes as it falls
+## below freezing, not as the air does. A model of more (drifts, the walls' snow, ice) extends this one.
 
 ## The standing water, millimetres over the ground, that fills the hollows to the brim (puddles 1),
 ## and the deepest it gets before it runs away
@@ -40,13 +42,17 @@ func get_state_defaults() -> Dictionary:
         "drying_mm_per_hour": 0.3,
         # how fast the ground soaks the standing water up, unfrozen
         "drainage_mm_per_hour": 2.0,
+        # how many world hours the ground's surface takes to come most of the way (1 - 1/e) to the air's
+        # temperature
+        "ground_temperature_hours": 3.0,
     }
 
 
 func configure(state: Dictionary, settings: Dictionary) -> void:
     if settings.has("snow_cover_enabled"):
         state["snow_cover_enabled"] = bool(settings["snow_cover_enabled"])
-    for key in ["snowfall_depth_per_hour", "snow_melt_rate", "rain_mm_per_hour", "drying_mm_per_hour", "drainage_mm_per_hour"]:
+    for key in ["snowfall_depth_per_hour", "snow_melt_rate", "rain_mm_per_hour", "drying_mm_per_hour", "drainage_mm_per_hour",
+            "ground_temperature_hours"]:
         if settings.has(key):
             state[key] = maxf(float(settings[key]), 0.0)
 
@@ -54,13 +60,18 @@ func configure(state: Dictionary, settings: Dictionary) -> void:
 ## hours of the weather on the ground: the snow (advance_snow()); the rain and the melt, in
 ## millimetres of water, wet the surfaces through with the first millimetre and run off into the
 ## hollows with the rest, the puddles; the ground soaks them up (hardly at all frozen) and they dry
-## the faster the warmer
+## the faster the warmer; the ground's surface comes after the air's temperature
+## (ground_temperature_hours)
 func advance(_world_3d: World3D, state: Dictionary, hours: float) -> void:
     if hours <= 0.0:
         return
     var precipitation := clampf(float(state.get("global_precipitation", 0.0)), 0.0, 1.0)
     var snow := clampf(float(state.get("snow_fraction", 0.0)), 0.0, 1.0)
     var temperature := float(state.get("air_temperature", 10.0))
+    var ground_temperature := get_ground_temperature(state)
+    var lag := float(state.get("ground_temperature_hours", 3.0))
+    ground_temperature += (temperature - ground_temperature) * (1.0 - exp(-hours / lag) if lag > 0.0 else 1.0)
+    state["ground_temperature"] = ground_temperature
     var rainfall := precipitation * (1.0 - snow)
     var rain_mm := get_rain_mm(state, rainfall)
     var melt := advance_snow(state, hours, precipitation * snow, rain_mm, temperature)
@@ -71,7 +82,7 @@ func advance(_world_3d: World3D, state: Dictionary, hours: float) -> void:
     var drying := get_drying(state, hours, temperature)
     if rainfall < 0.01:
         film -= drying
-    var soaking := float(state.get("drainage_mm_per_hour", 2.0)) * (1.0 if temperature > 0.0 else 0.1) * hours
+    var soaking := float(state.get("drainage_mm_per_hour", 2.0)) * (1.0 if ground_temperature > 0.0 else 0.1) * hours
     standing -= soaking + drying
     state["wetness"] = clampf(film / WeatherServer.WET_FILM_MM, 0.0, 1.0)
     state["standing_water"] = clampf(standing, 0.0, STANDING_WATER_MAX_MM)
@@ -79,6 +90,8 @@ func advance(_world_3d: World3D, state: Dictionary, hours: float) -> void:
 
 
 func set_ground(state: Dictionary, ground: Dictionary) -> void:
+    # a scenario's ground has lain in its weather: as warm as the air
+    state["ground_temperature"] = float(state.get("air_temperature", 10.0))
     if ground.has("snow_depth") or ground.has("snow_cover"):
         var depth := maxf(float(ground.get("snow_depth", state.get("snow_depth", 0.0))), 0.0)
         if ground.has("snow_cover"):
@@ -111,7 +124,10 @@ func get_globals(state: Dictionary) -> Dictionary:
         WeatherServer.SNOW_WETNESS_GLOBAL: float(state.get("snow_wetness", 0.0)),
         WeatherServer.WETNESS_GLOBAL: float(state.get("wetness", 0.0)),
         WeatherServer.AIR_TEMPERATURE_GLOBAL: float(state.get("air_temperature", 10.0)),
+        WeatherServer.GROUND_TEMPERATURE_GLOBAL: get_ground_temperature(state),
         WeatherServer.RAIN_GLOBAL: rain,
+        WeatherServer.SNOWFALL_GLOBAL: clampf(float(state.get("global_precipitation", 0.0)), 0.0, 1.0) \
+            * clampf(float(state.get("snow_fraction", 0.0)), 0.0, 1.0),
         WeatherServer.PUDDLES_GLOBAL: float(state.get("puddles", 0.0)),
         WeatherServer.WET_EXISTS_GLOBAL: wet,
         WeatherServer.SNOW_EXISTS_GLOBAL: snow,
@@ -131,7 +147,13 @@ func get_report(state: Dictionary) -> Dictionary:
         "wetness": float(state.get("wetness", 0.0)),
         "standing_water": float(state.get("standing_water", 0.0)),
         "puddles": float(state.get("puddles", 0.0)),
+        "ground_temperature": get_ground_temperature(state),
     }
+
+
+## The ground's surface's temperature (°C): the air's until the weather has gone on over it
+func get_ground_temperature(state: Dictionary) -> float:
+    return float(state.get("ground_temperature", state.get("air_temperature", 10.0)))
 
 
 ## A rain's millimetres an hour: a drizzle's couple, a downpour's rain_mm_per_hour (50) at the full
@@ -151,9 +173,9 @@ func get_drying(state: Dictionary, hours: float, temperature: float) -> float:
 
 
 ## The snowfall's water settling on the ground in an hour (mm): a sleet's melts as it lands above
-## freezing
+## freezing, and so does the snow on a ground still warmer than that (its surface's temperature)
 func get_snowfall_water(state: Dictionary, snowfall: float, temperature: float) -> float:
-    var settling := 1.0 - clampf((temperature - 1.0) / 2.0, 0.0, 1.0)
+    var settling := 1.0 - clampf((maxf(temperature, get_ground_temperature(state)) - 1.0) / 2.0, 0.0, 1.0)
     return snowfall * settling * float(state.get("snowfall_depth_per_hour", 0.06)) * WeatherServer.REFERENCE_SNOW_DENSITY * 1000.0
 
 
@@ -175,6 +197,8 @@ func get_probe_rates(state: Dictionary) -> Dictionary:
         "wet": float(state.get("wetness", 0.0)),
         "snow": float(state.get("snow_depth", 0.0)),
         "water": float(state.get("standing_water", 0.0)),
+        "ground_temperature_hours": float(state.get("ground_temperature_hours", 3.0)),
+        "flood": clampf(float(state.get("puddles", 0.0)) - 1.0, 0.0, 1.0),
     }
 
 
@@ -214,9 +238,11 @@ func advance_snow(state: Dictionary, hours: float, snowfall: float, rain_mm: flo
     wetness += (rain_mm * hours) / 3.0
     wetness -= hours * (0.3 + maxf(-temperature, 0.0) * 0.5)
     var melt := 0.0
-    if temperature > 0.0 and water > 0.0:
-        var air := get_snow_melt_per_degree(state) * temperature
-        var rain_heat := rain_mm * temperature / 80.0
+    # the air's warmth melts it from above, a ground warmer than freezing from below
+    var melting := maxf(temperature, 0.0) + maxf(get_ground_temperature(state), 0.0)
+    if melting > 0.0 and water > 0.0:
+        var air := get_snow_melt_per_degree(state) * melting
+        var rain_heat := rain_mm * maxf(temperature, 0.0) / 80.0
         melt = minf(water, (air + rain_heat) * hours)
         water -= melt
         wetness += melt / 3.0

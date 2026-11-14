@@ -25,8 +25,10 @@ there is one, and works without it.
 * puddles in the ground's hollows, drawn by the materials themselves: the rain past wetting the
   ground runs off into them, they ring in the rain, freeze, soak away and dry; and ponds
   (`PuddleSurface3D`) that keep their water
-* `PrecipitationVolume`s - shelters, closed interiors - that keep it out, a roof letting a slanting
-  one in from the windward side, an enclosed one none
+* every roof, canopy, tree and vehicle of the scene sheltering what is under it from the rain and
+  the snow by a map of the scene's own geometry rendered along the fall, a slanting rain wetting the
+  windward edge under a roof; and `PrecipitationVolume`s - shelters, closed interiors - where the
+  map is not enough
 * lightning and thunder in a storm; or flashes a minute and how far off they strike from a weather
   simulation, the thunder after its flash
 * the rainbow set from outside, or left to the sky
@@ -87,7 +89,10 @@ through 0 (`gnd_weather_surface()` takes 0.5): the puddles lie in its hollows
 (`gnd_weather_hollows()`), the deepest first, spreading as they fill and over them as it floods,
 a dark mirror, ice in a frost. `gnd_weather_apply()` sets the normal as well: the snow's heaps and
 the rain's rings on the water in the light. A terrain's material can sink its surface by
-`gnd_weather_hollows()` (the demo's ground does), so the puddles lie in its dips.
+`gnd_weather_hollows()` (the demo's ground does), so the puddles lie in its dips. The wet's sheen
+and the standing water fade out from `WeatherNode.water_reflections_fade_start` (30 m off the
+camera) to `water_reflections_fade_end` (55 m): further, more of the screen reflects, and the
+screen-space reflections cost every pixel of it.
 
 A dense mesh - a terrain - can heap the snow up as well:
 
@@ -148,7 +153,10 @@ pond, a deep puddle in a basin the ground sinks into - is a `PuddleSurface3D`: a
 and a `mask_texture` whose alpha is its depth - a round gradient will do: its shore wanders and its
 bottom is uneven (`shore_irregularity`, `shore_scale`). `fed_level` is how full it stays whatever
 the weather - a pond's 1 (the demo's); 0 and it is as full as the hollows, drying into a few
-smaller ones. Its shader takes the weather where it lies, from the ground's globals and the weather
+smaller ones. `flood_rise` is how far its water rises in a flood (`gnd_puddles` past 1, all of it
+at 2): a pond in a basin brims over the basin's sloping banks, which hold no water of their own -
+the standing water lies only on what faces up. Keep it under the banks' top (the demo's 0.13 m
+brings its water from 0.15 m below the ground to 2 cm below it). Its shader takes the weather where it lies, from the ground's globals and the weather
 probes, nothing of it worked out on the CPU nor every frame: it fills with the standing water
 (`gnd_puddles`) as much as stands there, ripples with the rain (`gnd_rain`) as much of it as reaches it
 (a shelter over it keeps the ripples off), freezes to a still sheet below 0 °C there - a heat source
@@ -158,6 +166,29 @@ reflections take it in (it no longer refracts what is under it: `refraction_stre
 `refraction_mix` are gone).
 
 ## Shelters
+
+The shelter map (`WeatherNode.shelter_map_*`, `PrecipitationShelterMap`) renders the scene's own
+opaque geometry about the camera with an orthogonal camera looking the way the precipitation falls,
+the wind slanting it, and keeps how far along the fall the first thing it meets is. A drop or a flake
+under something is not drawn. The snow, the wet and the standing water gather on the ground only as
+the precipitation reaches it (the weather probes' ground, below): what lies stays as the wind turns,
+and only what falls after keeps to the new shelter - every material including
+`weather_surface.gdshaderinc` has it through `gnd_weather_local()`. What falls now - the rain ringing
+the water - takes the map itself through `precipitation_shelter.gdshaderinc`
+(`gnd_weather_shelter_exposure()`, the globals `gnd_weather_shelter_map`,
+`gnd_weather_shelter_transform`, `gnd_weather_shelter_enabled`). No model needs a box of its own.
+
+* `shelter_map_extent` (96 m) and `shelter_map_resolution` (1024): the map's width about the camera
+  and its texels; beyond it only the volumes shelter.
+* The map is rendered again as the camera moves by a texel, as the fall turns, and every
+  `shelter_map_refresh_frames` frames for what moves under it (a train).
+* Anything narrower than about two texels - a wire, a thin mast - shelters nothing, and the snow
+  lying on a surface is never its own roof.
+* `shelter_map_cull_mask`: the render layers that shelter. Leave the directional lights out - give
+  them a layer of their own: the engine renders a light's shadows for every camera that sees its
+  layer, the map's too (the demo's sun is on layer 2).
+* It costs a render of the scene about the camera, unlit; `shelter_map_enabled` off, only the
+  volumes shelter. None on the Compatibility renderer.
 
 `PrecipitationVolume` with `precipitation_delta` -1 keeps the rain and the snow out of a box -
 a shelter, a porch, a car's interior - the way a roof does: what comes down
@@ -171,7 +202,7 @@ where the camera is (`precipitation_multiplier`, `lightning_multiplier`, `edge_f
 ## Weather probes and heat
 
 A lattice of weather probes stands fixed in the world about the camera (`WeatherNode`'s
-`weather_probe_cell`, 2 m, over `weather_probe_extent`, 128 x 32 x 128 m), worked out by a compute
+`weather_probe_cell`, 1 m, over `weather_probe_extent`, 128 x 32 x 128 m), worked out by a compute
 shader into two 3D textures on the weather's tick - every `weather_probe_seconds` (0.5), at once as
 their window moves, a shelter or a heat source changes - never every frame. Each probe holds how
 much of the precipitation reaches it (the `PrecipitationVolume`s with their delta, multiplier and

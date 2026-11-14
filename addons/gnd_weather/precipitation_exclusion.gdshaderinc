@@ -6,6 +6,11 @@
 // under the roof from the windward side, as it does. An enclosed box (its bit in
 // exclusion_enclosed_mask, PrecipitationVolume.enclosed) has walls all round - a car's interior: nothing
 // inside it is wet, whichever way the wind blows.
+// The shelter map (PrecipitationShelterMap) shelters by the scene's own geometry besides: a point
+// under it is sheltered whatever the boxes say. Given as the material's own, set by the WeatherNode as
+// the map is rendered - whatever the project names the ground's globals.
+
+#include "res://addons/gnd_weather/precipitation_shelter_map.gdshaderinc"
 
 // as many as WeatherNode.MAX_PRECIPITATION_EXCLUSION_VOLUMES, the nearest the camera
 const int MAX_EXCLUSIONS = 16;
@@ -13,6 +18,9 @@ uniform int exclusion_count = 0;
 uniform mat4 exclusion_inverse_transforms[MAX_EXCLUSIONS];
 uniform vec3 exclusion_half_sizes[MAX_EXCLUSIONS];
 uniform int exclusion_enclosed_mask = 0;
+uniform sampler2D shelter_map : filter_nearest, repeat_disable;
+uniform mat4 shelter_transform = mat4(1.0);
+uniform bool shelter_enabled = false;
 
 // The weather probes (WeatherNode, WeatherProbes): how much of the precipitation reaches each, by
 // every volume about them - its delta, multiplier and feathered edge - in a lattice fixed in the
@@ -29,7 +37,10 @@ float precipitation_reach(vec3 world_position) {
 	if (!weather_probes_enabled || any(lessThan(in_window, vec3(0.0))) || any(greaterThan(in_window, vec3(1.0)))) {
 		return 1.0;
 	}
-	return clamp(texture(weather_probes, world_position / weather_probe_size).r, 0.0, 1.0);
+	// a probe holds the weather of its cell (WeatherProbes): the cell it is in
+	float cell = weather_probe_size.y / float(max(textureSize(weather_probes, 0).y, 1));
+	vec3 at = vec3(world_position.x, (floor(world_position.y / cell) + 0.5) * cell, world_position.z);
+	return clamp(texture(weather_probes, at / weather_probe_size).r, 0.0, 1.0);
 }
 
 // Whether a card standing from start along down for span metres, margin metres about it, may
@@ -57,8 +68,9 @@ bool precipitation_near_shelter(vec3 start, vec3 down, float span, float margin)
 	return false;
 }
 
-// world_position - the drop's or the flake's; velocity - its flight (world space, any length)
-bool precipitation_sheltered(vec3 world_position, vec3 velocity) {
+// world_position - the drop's or the flake's; velocity - its flight (world space, any length): by the
+// boxes alone
+bool precipitation_sheltered_by_volumes(vec3 world_position, vec3 velocity) {
 	for (int i = 0; i < MAX_EXCLUSIONS; i++) {
 		if (i >= exclusion_count) {
 			break;
@@ -86,4 +98,15 @@ bool precipitation_sheltered(vec3 world_position, vec3 velocity) {
 		}
 	}
 	return false;
+}
+
+// Under the shelter map (rendered along the precipitation's own fall) at world_position
+bool precipitation_sheltered_by_map(vec3 world_position) {
+	return shelter_enabled && precipitation_shelter_covered(shelter_map, shelter_transform, world_position,
+		PRECIPITATION_SHELTER_DROP_BIAS);
+}
+
+// Under the shelter map (whatever velocity is) or a box
+bool precipitation_sheltered(vec3 world_position, vec3 velocity) {
+	return precipitation_sheltered_by_map(world_position) || precipitation_sheltered_by_volumes(world_position, velocity);
 }

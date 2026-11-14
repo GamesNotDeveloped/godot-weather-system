@@ -17,6 +17,8 @@ uniform vec4 shallow_color : source_color = vec4(0.11, 0.15, 0.13, 1.0);
 uniform vec4 deep_color : source_color = vec4(0.03, 0.06, 0.07, 1.0);
 // how full it stays whatever the weather: a pond's 1, a puddle's 0 (only the rain's water in it)
 uniform float fed_level : hint_range(0.0, 1.0) = 0.0;
+// how far its water rises in a flood (m, PuddleSurface3D.flood_rise)
+uniform float flood_rise = 0.0;
 uniform vec3 ice_tint : source_color = vec3(0.78, 0.84, 0.9);
 uniform vec3 snow_albedo : source_color = vec3(0.86, 0.88, 0.92);
 uniform float rain_ripple_threshold : hint_range(0.0, 1.0) = 0.12;
@@ -43,6 +45,10 @@ uniform float ripple_speed : hint_range(0.1, 4.0) = 0.9;
 uniform float ripple_max_radius : hint_range(0.0, 5.0) = 1.0;
 uniform float edge_foam_strength : hint_range(0.0, 1.0) = 0.08;
 uniform float normal_strength : hint_range(0.0, 8.0) = 1.4;
+
+// how high the waves are of wave_intensity's in the still air and in a GND_WIND_WAVELET_FULL wind
+const float GND_POND_WAVES_STILL = 0.6;
+const float GND_POND_WAVES_HIGH = 3.0;
 
 const float HASHSCALE1 = 0.1031;
 const vec3 HASHSCALE3 = vec3(0.1031, 0.1030, 0.0973);
@@ -86,17 +92,22 @@ float sample_mask_alpha(vec2 uv) {
 
 void vertex() {
     shore_seed = MODEL_MATRIX[3].xz * 0.37;
+    // risen in a flood: the ground's standing water past the brim, all of flood_rise at twice the brim
+    float rise = flood_rise * clamp(gnd_puddles - 1.0, 0.0, 1.0);
+    VERTEX += inverse(mat3(MODEL_MATRIX)) * vec3(0.0, rise, 0.0);
     world_position = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
 
-// How much of the precipitation reaches world_position, of the open sky's: the probes', 1 out of them
+// How much of the precipitation reaches world_position, of the open sky's: the probes', 1 out of them,
+// and none under the shelter map
 float precipitation_reach(vec3 position) {
+    float shelter = gnd_weather_shelter_exposure(position, gnd_weather_surface_shelter_bias());
     float inside = gnd_weather_probe_blend(position);
     if (inside <= 0.0) {
-        return 1.0;
+        return shelter;
     }
-    return mix(1.0, texture(gnd_weather_probes, position / gnd_weather_probe_size).r, inside);
+    return mix(1.0, texture(gnd_weather_probes, gnd_weather_probe_coordinate(position)).r, inside) * shelter;
 }
 
 
@@ -166,8 +177,9 @@ float water_height(vec2 uv, float time_value, float rain_strength, float frozen)
     if (mask <= 0.001) {
         return 0.0;
     }
-    // ice does not ripple
-    float waves = (primary_wave_height(uv, time_value) + secondary_wave_height(uv, time_value)) * (1.0 - frozen);
+    // ice does not ripple; the waves the higher the harder the wind blows, some even in the still air
+    float wind = mix(GND_POND_WAVES_STILL, GND_POND_WAVES_HIGH, smoothstep(0.0, GND_WIND_WAVELET_FULL, gnd_wind_speed));
+    float waves = (primary_wave_height(uv, time_value) + secondary_wave_height(uv, time_value)) * wind * (1.0 - frozen);
     float ripples = ripple_height(uv, time_value, rain_strength);
     return (waves + ripples) * mask;
 }
@@ -218,11 +230,20 @@ void fragment() {
     SPECULAR = specular_strength * (1.0 - edge_blend * 0.6);
     ROUGHNESS = clamp(surface_roughness + edge_blend * 0.16, 0.02, 0.32);
 
+    // the snow's flakes melting on it, as much of the snow as reaches it, not on the ice
+    float flakes = gnd_weather_flakes_on_water_at(world_position.xz, length(fwidth(world_position.xz)))
+        * precipitation_reach(world_position) * (1.0 - frozen);
+    ALBEDO = mix(ALBEDO, snow_albedo, flakes);
+    ROUGHNESS = mix(ROUGHNESS, 0.6, flakes);
+    SPECULAR *= 1.0 - flakes;
+
     // ice: a pale, still sheet over the water
     ALBEDO = mix(ALBEDO, ice_tint * 0.35, frozen);
     ROUGHNESS = mix(ROUGHNESS, 0.12, frozen);
     // snow lying on it hides it, the more the thicker
-    float snowed = smoothstep(0.15, 0.55, snow_cover) * mix(0.6, 1.0, frozen);
+    // the snow lies on the ice, not on the water (it melts into it): first its flakes, then its cover
+    float lying = gnd_weather_flakes_lying_at(world_position.xz, length(fwidth(world_position.xz)), snow_cover);
+    float snowed = max(smoothstep(0.15, 0.55, snow_cover), lying) * frozen;
     ALBEDO = mix(ALBEDO, snow_albedo, snowed);
     SPECULAR *= 1.0 - snowed;
     ROUGHNESS = mix(ROUGHNESS, 0.8, snowed);
