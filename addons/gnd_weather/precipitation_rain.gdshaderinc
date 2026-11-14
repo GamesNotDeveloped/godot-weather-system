@@ -136,8 +136,10 @@ void vertex() {
 }
 
 void fragment() {
-	// under a roof, or in a car: a card's corners above the roof and below the floor let it through
-	if (precipitation_open <= 0.01 || (near_shelter > 0.5 && precipitation_sheltered(drop_position, fall_direction))) {
+	// under a roof, or in a car: a card's corners above the roof and below the floor let it through -
+	// the shelter map every pixel, the boxes only where the card may reach under one
+	if (precipitation_open <= 0.01 || precipitation_sheltered_by_map(drop_position)
+			|| (near_shelter > 0.5 && precipitation_sheltered_by_volumes(drop_position, fall_direction))) {
 		discard;
 	}
 	float instance_alpha = clamp(instance_custom_data.g, 0.0, 1.0) * edge_fade * precipitation_open;

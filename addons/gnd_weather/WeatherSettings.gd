@@ -30,6 +30,12 @@ const PROPERTIES: Array[StringName] = [
     &"weather_probe_cell",
     &"weather_probe_extent",
     &"weather_probe_seconds",
+    &"shelter_map_enabled",
+    &"shelter_map_extent",
+    &"shelter_map_resolution",
+    &"shelter_map_refresh_frames",
+    &"water_reflections_fade_start",
+    &"water_reflections_fade_end",
 ]
 
 

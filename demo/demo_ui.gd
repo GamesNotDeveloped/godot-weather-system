@@ -14,6 +14,7 @@ var _temperature_row: Control
 var _snow_row: Control
 var _from_temperature: CheckBox
 var _snow_cover: CheckBox
+var _shelter_map: CheckBox
 # a warm place in the ground before the camera (a boiler room's pit): no snow lies on it
 var _warm_ground: WeatherHeatSource3D
 # [slider, number label, step, getter]: the panel follows the weather, whatever changed it
@@ -50,6 +51,11 @@ func _ready() -> void:
     _snow_cover.button_pressed = _weather.snow_cover_enabled
     _snow_cover.toggled.connect(func(pressed: bool) -> void: _weather.snow_cover_enabled = pressed)
     box.add_child(_snow_cover)
+    _shelter_map = CheckBox.new()
+    _shelter_map.text = "Roofs and trees shelter (shelter map)"
+    _shelter_map.button_pressed = _weather.shelter_map_enabled
+    _shelter_map.toggled.connect(func(pressed: bool) -> void: _weather.shelter_map_enabled = pressed)
+    box.add_child(_shelter_map)
     _warm_ground = WeatherHeatSource3D.new()
     _warm_ground.name = "WarmGround"
     _warm_ground.size = Vector3(3.0, 1.0, 3.0)
@@ -61,12 +67,12 @@ func _ready() -> void:
         func(v: float) -> void: _warm_ground.temperature = v)
     _add_slider(box, "Snow density", 0.1, 4.0, 0.01, func() -> float: return _weather.snow_density,
         func(v: float) -> void: _weather.snow_density = v)
+    _add_slider(box, "Water fades from m", 0.0, 1000.0, 1.0, func() -> float: return _weather.water_reflections_fade_start,
+        func(v: float) -> void: _weather.water_reflections_fade_start = v)
+    _add_slider(box, "Water gone at m", 1.0, 1000.0, 1.0, func() -> float: return _weather.water_reflections_fade_end,
+        func(v: float) -> void: _weather.water_reflections_fade_end = v)
     _add_slider(box, "Time x", 1.0, 3600.0, 1.0, func() -> float: return _weather.weather_time_scale,
         func(v: float) -> void: _weather.weather_time_scale = v, true)
-    _add_slider(box, "Month", 1.0, 12.0, 1.0, func() -> float: return _weather.date_month,
-        func(v: float) -> void: _weather.set_date(_weather.date_year, int(v), 15))
-    _add_slider(box, "Latitude °", -90.0, 90.0, 0.5, func() -> float: return _weather.latitude,
-        func(v: float) -> void: _weather.latitude = v)
 
     var buttons := HBoxContainer.new()
     box.add_child(buttons)
@@ -99,14 +105,18 @@ func _process(_delta: float) -> void:
             entry[1].text = str(snappedf(value, entry[2]))
     if _snow_cover.button_pressed != _weather.snow_cover_enabled:
         _snow_cover.set_pressed_no_signal(_weather.snow_cover_enabled)
+    if _shelter_map.button_pressed != _weather.shelter_map_enabled:
+        _shelter_map.set_pressed_no_signal(_weather.shelter_map_enabled)
     if _from_temperature.button_pressed != _weather.snow_from_temperature:
         _from_temperature.set_pressed_no_signal(_weather.snow_from_temperature)
         _on_snow_from_temperature(_weather.snow_from_temperature)
     var seasons := ["winter", "spring", "summer", "autumn"]
     var puddles := float(WeatherServer.get_weather_state(_weather.get_world_3d()).get("puddles", 0.0))
-    _readout.text = "falling: %d%% snow, wind %.1f m/s\nground: snow %d cm, wet %d%%, puddles %d%%   season: %s" % [
+    var ground_temperature := float(WeatherServer.get_weather_state(_weather.get_world_3d()).get("ground_temperature", 0.0))
+    _readout.text = "falling: %d%% snow, wind %.1f m/s, ground %.1f °C\nground: snow %d cm, wet %d%%, puddles %d%%   season: %s" % [
         roundi(_weather.get_falling_snow_fraction() * 100.0),
         WeatherServer.get_final_wind_speed(_weather.get_world_3d()),
+        ground_temperature,
         roundi(_weather.snow_depth * 100.0),
         roundi(_weather.wetness * 100.0),
         roundi(puddles * 100.0),

@@ -25,6 +25,14 @@ const PUDDLE_SURFACE_SHADER := preload("res://addons/gnd_weather/puddle_surface.
     set(value):
         fed_level = value
         _sync_render_state()
+## How far its water rises in a flood, in metres: the ground's standing water past the brim
+## (gnd_puddles past 1), all of it at twice the brim - a pond in a basin brims over the basin's sloping
+## banks, which hold no water of their own (only a surface facing up does). Kept under the banks' top:
+## the risen water meets the flooded ground there
+@export_range(0.0, 2.0, 0.001, "suffix:m") var flood_rise: float = 0.0:
+    set(value):
+        flood_rise = maxf(value, 0.0)
+        _sync_render_state()
 @export_range(0.0, 0.2, 0.001) var surface_height_offset: float = 0.078:
     set(value):
         surface_height_offset = value
@@ -141,6 +149,7 @@ func _sync_render_state() -> void:
 
     _material.set_shader_parameter("mask_texture", mask_texture)
     _material.set_shader_parameter("fed_level", fed_level)
+    _material.set_shader_parameter("flood_rise", flood_rise)
     _material.set_shader_parameter("rain_ripple_threshold", rain_ripple_threshold)
     _material.set_shader_parameter("puddle_alpha_cutoff", puddle_alpha_cutoff)
     _material.set_shader_parameter("visibility_range_begin", visibility_range_begin)
